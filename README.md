@@ -14,6 +14,20 @@
 
 ---
 
+## 👥 Project Team Members
+
+| # | Roll Number | Name | Program |
+|:---:|:---:|:---|:---|
+| 1 | `MT25007` | **Aastha Kalbhor** | M.Tech CSE |
+| 2 | `MT25015` | **Aniket Raj Singh** | M.Tech CSE |
+| 3 | `MT25063` | **Anurag Sharma** | M.Tech CSE |
+| 4 | `MT25081` | **Saloni Narang** | M.Tech CSE |
+
+**Project Title:** Identification of Uninsured Vehicles While They Are on the Road  
+**Course:** Information Integration & Analytics (IIA)
+
+---
+
 ## 📖 Executive Summary & Scope
 
 **VehicleSentinel** is a production-grade, distributed information integration system designed to detect uninsured, stolen, and non-compliant vehicles in real-time as they travel across national highway networks.
