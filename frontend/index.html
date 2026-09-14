@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VahanRakshak | Identification of Uninsured Vehicles on Road</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <a href="/" class="brand-wrapper">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/" class="active">🏠 Dashboard</a>
+      <a href="/pages/inspector.html">🔍 Vehicle Inspector</a>
+      <a href="/pages/fleet.html">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="content-area">
+
+    <!-- Hero Search Section -->
+    <div class="glass-card" style="margin-bottom: 2rem; text-align: center; padding: 2.5rem 1.5rem;">
+      <h2 style="font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 0.5rem;">
+        Vehicle Compliance & Insurance Verification
+      </h2>
+      <p style="color: var(--text-secondary); max-width: 650px; margin: 0 auto 1.75rem auto; font-size: 0.95rem;">
+        Cross-validates road sightings against MoRTH VAHAN, IRDAI IIB, Police CCTNS, and Highway Toll Cameras via distributed mediator queries in &lt;5ms.
+      </p>
+
+      <div style="max-width: 580px; margin: 0 auto;">
+        <div class="search-container">
+          <div class="search-input-wrapper">
+            <input type="text" id="hero-search-input" class="search-input" placeholder="e.g. DL01AB1004" value="DL01AB1004">
+          </div>
+          <button class="btn btn-primary" id="btn-hero-search">Inspect Vehicle</button>
+        </div>
+
+        <div class="chips-row" style="justify-content: center;">
+          <span class="chip-label">Quick Test Scenarios:</span>
+          <span class="chip" onclick="quickNav('DL01AB1001')">DL01AB1001 (Insured)</span>
+          <span class="chip" onclick="quickNav('DL01AB1002')">DL01AB1002 (Expired)</span>
+          <span class="chip" onclick="quickNav('DL01AB1003')">DL01AB1003 (No Cover)</span>
+          <span class="chip" onclick="quickNav('DL01AB1004')">DL01AB1004 (Stolen)</span>
+          <span class="chip" onclick="quickNav('DL01AB1005')">DL01AB1005 (Scrapped)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live KPI Summary Grid -->
+    <div class="stats-grid" id="kpi-grid">
+      <div class="stat-card info">
+        <div class="stat-label"><span>🚗</span> Vehicles on Record</div>
+        <div class="stat-value" id="kpi-total">--</div>
+        <div class="stat-subtext">Global Kimball Star Schema Cache</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label"><span>⚠️</span> Currently Uninsured</div>
+        <div class="stat-value" id="kpi-uninsured" style="color:var(--status-danger);">--</div>
+        <div class="stat-subtext">Flagged under Section 196</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="stat-label"><span>⏳</span> Insurance Expired</div>
+        <div class="stat-value" id="kpi-expired" style="color:var(--status-warning);">--</div>
+        <div class="stat-subtext">Operating on expired policy</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="stat-label"><span>🚨</span> Stolen / Scrapped on Road</div>
+        <div class="stat-value" id="kpi-stolen" style="color:#ef4444;">--</div>
+        <div class="stat-subtext">High critical police alert</div>
+      </div>
+      <div class="stat-card success">
+        <div class="stat-label"><span>📨</span> E-Challans Required</div>
+        <div class="stat-value" id="kpi-challans" style="color:var(--status-success);">--</div>
+        <div class="stat-subtext">Pending official notice generation</div>
+      </div>
+    </div>
+
+    <!-- Live Agency Microservices Mesh -->
+    <div class="glass-card" style="margin-bottom: 2rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <div>
+          <h3 style="font-size: 1.15rem; font-weight: 700;">Distributed Agency API Mesh (Local Schemas)</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Five isolated microservices communicating with the central Mediator</p>
+        </div>
+        <span class="badge badge-info">Zero Direct Cross-DB Joins</span>
+      </div>
+
+      <div class="federation-grid" id="services-status-grid">
+        <div class="agency-card">
+          <div class="agency-header">
+            <span class="agency-name">IIB Insurance Service</span>
+            <span class="badge badge-success">Port 5002</span>
+          </div>
+          <div class="agency-meta">Key: <code>registration_no</code></div>
+          <div class="agency-query-badge">IRDAI National Policy Repository</div>
+        </div>
+
+        <div class="agency-card">
+          <div class="agency-header">
+            <span class="agency-name">MoRTH VAHAN Registry</span>
+            <span class="badge badge-success">Port 5003</span>
+          </div>
+          <div class="agency-meta">Key: <code>vehicle_registration_id</code></div>
+          <div class="agency-query-badge">API Setu / NIC RC Database</div>
+        </div>
+
+        <div class="agency-card">
+          <div class="agency-header">
+            <span class="agency-name">Police CCTNS & RVSF</span>
+            <span class="badge badge-success">Port 5004</span>
+          </div>
+          <div class="agency-meta">Key: <code>vehicle_no</code></div>
+          <div class="agency-query-badge">Stolen FIRs & Scrappage Facility</div>
+        </div>
+
+        <div class="agency-card">
+          <div class="agency-header">
+            <span class="agency-name">Traffic ANPR Network</span>
+            <span class="badge badge-success">Port 5005</span>
+          </div>
+          <div class="agency-meta">Key: <code>plate_number</code></div>
+          <div class="agency-query-badge">Highway Toll Checkpoint Cameras</div>
+        </div>
+
+        <div class="agency-card">
+          <div class="agency-header">
+            <span class="agency-name">MoRTH e-Challan System</span>
+            <span class="badge badge-success">Port 5006</span>
+          </div>
+          <div class="agency-meta">Key: <code>vehicle_identifier</code></div>
+          <div class="agency-query-badge">Automated Ticket Issuance & Fine Portal</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- City Breakdown Grid -->
+    <div class="glass-card">
+      <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 0.25rem;">City-Level Violation Hotspots</h3>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem;">Aggregated directly at the database engine level via SQL GROUP BY</p>
+      
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Camera Location / Checkpoint</th>
+              <th>Vehicles Detected</th>
+              <th>Uninsured Detected</th>
+              <th>Critical Violations</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="cities-tbody">
+            <tr><td colspan="5" style="text-align:center; padding:1.5rem; color:var(--text-muted);">Loading city metrics...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div>VahanRakshak • Information Integration & Analytics (IIA) Enterprise Showcase</div>
+    <div class="footer-tags">
+      <span class="footer-tag">Mediator-Wrapper</span>
+      <span class="footer-tag">Cache-Aside</span>
+      <span class="footer-tag">Kimball DWH</span>
+      <span class="footer-tag">Parivahan APIs</span>
+    </div>
+  </footer>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Load KPIs
+      try {
+        const kpis = await API.getFleetKpis();
+        document.getElementById('kpi-total').textContent = kpis.total_vehicles.toLocaleString();
+        document.getElementById('kpi-uninsured').textContent = kpis.uninsured.toLocaleString();
+        document.getElementById('kpi-expired').textContent = kpis.expired.toLocaleString();
+        document.getElementById('kpi-stolen').textContent = (kpis.stolen || 0).toLocaleString();
+        document.getElementById('kpi-challans').textContent = kpis.challans_required.toLocaleString();
+      } catch (e) {
+        console.error("Error loading KPIs", e);
+      }
+
+      // Load Cities
+      try {
+        const cities = await API.getFleetCities();
+        const tbody = document.getElementById('cities-tbody');
+        if (tbody && cities.length > 0) {
+          tbody.innerHTML = cities.map(c => `
+            <tr>
+              <td><strong>${c.location}</strong></td>
+              <td><span style="font-family:var(--font-mono);">${c.count}</span></td>
+              <td><span class="badge badge-danger">${c.uninsured}</span></td>
+              <td><span class="badge ${c.critical > 0 ? 'badge-danger' : 'badge-success'}">${c.critical}</span></td>
+              <td><a href="/pages/fleet.html?location=${encodeURIComponent(c.location)}" class="btn btn-secondary btn-sm">Filter City</a></td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {
+        console.error("Error loading cities", e);
+      }
+
+      // Search button
+      document.getElementById('btn-hero-search').addEventListener('click', () => {
+        const plate = document.getElementById('hero-search-input').value.trim();
+        if (plate) quickNav(plate);
+      });
+      document.getElementById('hero-search-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          const plate = e.target.value.trim();
+          if (plate) quickNav(plate);
+        }
+      });
+    });
+
+    function quickNav(plate) {
+      window.location.href = `/pages/inspector.html?plate=${encodeURIComponent(plate)}`;
+    }
+  </script>
+</body>
+</html>

@@ -1,38 +1,6 @@
-# ====================================================================
-# VehicleSentinel — Cross-Platform Dependencies
-# Supported OS: macOS (Intel & Apple Silicon M1/M2/M3/M4), Linux, Windows
-# Python Version: Python 3.9+
-# ====================================================================
-#
-# QUICK SETUP INSTRUCTIONS:
-#
-# --- For macOS / Linux (MacBook Terminal) ---
-# 1. Open Terminal and navigate to the project directory:
-#      cd path/to/P1
-# 2. (Recommended) Create & activate a virtual environment:
-#      python3 -m venv venv
-#      source venv/bin/activate
-# 3. Install dependencies:
-#      pip install -r requirements.txt
-# 4. Populate databases:
-#      python3 setup_databases.py
-# 5. Launch server:
-#      python3 app.py
-#    (Note for Mac: If port 5000 is occupied by macOS AirPlay, run: PORT=5001 python3 app.py)
-#
-# --- For Windows (PowerShell / CMD) ---
-# 1. Open PowerShell and navigate to the project directory:
-#      cd "path\to\P1"
-# 2. (Optional) Create & activate virtual environment:
-#      python -m venv venv
-#      .\venv\Scripts\activate
-# 3. Install dependencies:
-#      pip install -r requirements.txt
-# 4. Populate databases:
-#      python setup_databases.py
-# 5. Launch server:
-#      python app.py
-# ====================================================================
-
-Flask>=3.0.0
-Flask-CORS>=4.0.0
+streamlit>=1.32
+pandas>=2.0
+plotly>=5.18
+pytest>=7.4
+flask>=3.0
+flask-cors>=4.0

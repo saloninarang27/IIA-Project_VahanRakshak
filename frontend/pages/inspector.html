@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vehicle Inspector | VahanRakshak</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <a href="/" class="brand-wrapper">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">🏠 Dashboard</a>
+      <a href="/pages/inspector.html" class="active">🔍 Vehicle Inspector</a>
+      <a href="/pages/fleet.html">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <main class="content-area">
+
+    <!-- Search & Control Header -->
+    <div class="glass-card" style="margin-bottom: 2rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <div>
+          <h2 style="font-size:1.5rem; font-weight:800;">🔍 Vehicle Dossier Inspector</h2>
+          <p style="font-size:0.85rem; color:var(--text-muted);">Query the central Mediator to inspect cache status or trigger a live federated pull across all 5 agencies</p>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-force-sync" title="Bypasses cache and calls all 5 microservices live">
+          ⚡ Force Live Sync (Bypass Cache)
+        </button>
+      </div>
+
+      <div class="search-container" style="margin-bottom:1rem;">
+        <div class="search-input-wrapper">
+          <input type="text" id="plate-input" class="search-input" placeholder="Type Plate Number (e.g. DL01AB1004)" value="DL01AB1004">
+        </div>
+        <button class="btn btn-primary" id="btn-search">Run Inspection</button>
+      </div>
+
+      <div class="chips-row">
+        <span class="chip-label">Test Scenarios:</span>
+        <span class="chip" data-plate="DL01AB1001">DL01AB1001 (Valid Insurance)</span>
+        <span class="chip" data-plate="DL01AB1002">DL01AB1002 (Expired Cover)</span>
+        <span class="chip" data-plate="DL01AB1003">DL01AB1003 (No Policy Found)</span>
+        <span class="chip" data-plate="DL01AB1004">DL01AB1004 (Stolen on Road)</span>
+        <span class="chip" data-plate="DL01AB1005">DL01AB1005 (Scrapped on Road)</span>
+        <span class="chip" data-plate="DL01AB1006">DL01AB1006 (Expired RC)</span>
+        <span class="chip" data-plate="DL01AB1010">DL01AB1010 (Multiple Policies)</span>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="inspector-loading" style="display:none; text-align:center; padding:3rem;" class="glass-card">
+      <div style="font-size:2rem; margin-bottom:1rem; animation: pulse-dot 1s infinite;">🛰️</div>
+      <h3>Decomposing query and federating across agency APIs...</h3>
+      <p style="color:var(--text-muted); font-size:0.85rem;">Contacting IIB, VAHAN, Police CCTNS, ANPR, and e-Challan services</p>
+    </div>
+
+    <!-- Empty State -->
+    <div id="inspector-empty" style="text-align:center; padding:3rem;" class="glass-card">
+      <p style="color:var(--text-muted);">Enter a vehicle registration number above to inspect complete history.</p>
+    </div>
+
+    <!-- Results Section -->
+    <div id="inspector-results" style="display:none;">
+
+      <!-- Primary Dossier Card -->
+      <div class="glass-card">
+        <div class="dossier-header">
+          <div class="plate-title-group">
+            <div class="plate-display" id="res-plate">DL01AB1004</div>
+            <div id="res-source-badge"></div>
+            <div id="res-risk-badge"></div>
+          </div>
+          <div style="display:flex; gap:0.5rem;" id="res-badges-right">
+            <span id="res-insurance-badge"></span>
+            <span id="res-theft-badge"></span>
+          </div>
+        </div>
+
+        <!-- Action / Violation Notice Banner -->
+        <div id="challan-action-box" style="margin-bottom:1.5rem;"></div>
+
+        <!-- 2-Column Details Grid -->
+        <div class="dossier-grid">
+          <!-- Left Column: Specs & Registration & Insurance -->
+          <div>
+            <h4 style="font-size:0.95rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Vehicle Specifications & Registration (VAHAN)</h4>
+            <table class="details-table" style="margin-bottom:1.5rem;">
+              <tr><td class="label">Make & Model</td><td class="val" id="val-make-model">--</td></tr>
+              <tr><td class="label">Type & Fuel</td><td class="val" id="val-type-fuel">--</td></tr>
+              <tr><td class="label">Color</td><td class="val" id="val-color">--</td></tr>
+              <tr><td class="label">Registered Owner</td><td class="val" id="val-owner">--</td></tr>
+              <tr><td class="label">RC Status</td><td class="val" id="val-reg-status">--</td></tr>
+              <tr><td class="label">Registration Date</td><td class="val" id="val-reg-date">--</td></tr>
+              <tr><td class="label">Fitness / RC Expiry</td><td class="val" id="val-reg-expiry">--</td></tr>
+            </table>
+
+            <h4 style="font-size:0.95rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Insurance Coverage Details (IIB IRDAI)</h4>
+            <table class="details-table">
+              <tr><td class="label">Insurance Provider</td><td class="val" id="val-insurer">--</td></tr>
+              <tr><td class="label">Policy Number</td><td class="val" style="font-family:var(--font-mono);" id="val-policy-no">--</td></tr>
+              <tr><td class="label">Policy Expiry Date</td><td class="val" id="val-policy-expiry">--</td></tr>
+            </table>
+          </div>
+
+          <!-- Right Column: Camera Sightings & Police Records -->
+          <div>
+            <h4 style="font-size:0.95rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Road Sightings (Highway ANPR)</h4>
+            <table class="details-table" style="margin-bottom:1.5rem;">
+              <tr><td class="label">Last Camera Location</td><td class="val" id="val-location">--</td></tr>
+              <tr><td class="label">Sighting Timestamp</td><td class="val" style="font-family:var(--font-mono);" id="val-capture-time">--</td></tr>
+              <tr><td class="label">Toll Camera ID</td><td class="val" style="font-family:var(--font-mono);" id="val-cam-id">--</td></tr>
+            </table>
+
+            <h4 style="font-size:0.95rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Police & Scrappage Records (CCTNS / RVSF)</h4>
+            <table class="details-table">
+              <tr><td class="label">Theft Record</td><td class="val" id="val-theft-status">--</td></tr>
+              <tr><td class="label">FIR / Theft Report Date</td><td class="val" id="val-theft-date">--</td></tr>
+              <tr><td class="label">Scrapping Certificate</td><td class="val" id="val-scrapping-status">--</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Federated Query Inspector Visualizer -->
+      <div class="federation-box">
+        <div class="federation-header">
+          <div>
+            <h3 style="font-size:1.15rem; font-weight:700;">🌐 Live Federated Query Visualizer (IIA Mediator Architecture)</h3>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;">
+              Demonstrates 1 high-level query decomposing into 5 concurrent calls with heterogeneous local attribute keys
+            </p>
+          </div>
+          <span class="badge badge-success">Federation Operational</span>
+        </div>
+
+        <div class="federation-grid" id="federation-cards-container">
+          <!-- Populated dynamically by inspector.js -->
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="app-footer">
+    <div>VahanRakshak • Vehicle Dossier Inspector</div>
+    <div class="footer-tags">
+      <span class="footer-tag">Cache-Aside Engine</span>
+      <span class="footer-tag">Heterogeneous Keys</span>
+      <span class="footer-tag">Sub-10ms Lookup</span>
+    </div>
+  </footer>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/inspector.js"></script>
+</body>
+</html>

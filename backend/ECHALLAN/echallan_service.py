@@ -1,0 +1,190 @@
+"""
+MoRTH e-Challan & Ministry of Transport Reporting Microservice.
+Operates on its own local database (ministry_echallan.db).
+Local vehicle identifier column: vehicle_identifier.
+Runs independently on Port 5006.
+"""
+import os
+import sqlite3
+from datetime import datetime
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
+import urllib.request
+import json
+
+app = Flask(__name__)
+CORS(app)
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ministry_echallan.db")
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+@app.route("/api/v1/health", methods=["GET"])
+def health():
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM ministry_report").fetchone()[0]
+        submitted = conn.execute("SELECT COUNT(*) FROM ministry_report WHERE report_status = 'SUBMITTED'").fetchone()[0]
+        resolved = conn.execute("SELECT COUNT(*) FROM ministry_report WHERE report_status IN ('CLOSED', 'RESOLVED')").fetchone()[0]
+    return jsonify({
+        "status": "UP",
+        "service": "MoRTH e-Challan & Ministry Reporting System",
+        "authority": "Ministry of Road Transport and Highways (MoRTH)",
+        "local_identifier": "vehicle_identifier",
+        "total_challans": count,
+        "pending_review": submitted,
+        "resolved_challans": resolved
+    })
+
+@app.route("/api/v1/challans/<vehicle_identifier>", methods=["GET"])
+def get_challans_for_vehicle(vehicle_identifier):
+    clean_id = vehicle_identifier.strip().upper().replace(" ", "").replace("-", "")
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT report_id, vehicle_identifier, report_type, report_reason,
+                   detected_at, severity, report_status, submitted_at, ministry_reference
+            FROM ministry_report
+            WHERE vehicle_identifier = ?
+            ORDER BY submitted_at DESC
+            """,
+            (clean_id,)
+        ).fetchall()
+
+    challans = [dict(r) for r in rows]
+    from datetime import timezone
+    last_mod = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    resp = make_response(jsonify({
+        "agency": "MORTH_ECHALLAN",
+        "query_key": "vehicle_identifier",
+        "vehicle_identifier": clean_id,
+        "count": len(challans),
+        "challans": challans
+    }))
+    resp.headers["Last-Modified"] = last_mod
+    return resp
+
+@app.route("/api/v1/challans", methods=["POST"])
+def issue_challan():
+    data = request.get_json(force=True)
+    clean_id = data.get("vehicle_identifier", "").strip().upper().replace(" ", "").replace("-", "")
+    if not clean_id:
+        return jsonify({"error": "Missing vehicle_identifier"}), 400
+
+    report_type = data.get("report_type", "UNINSURED_VEHICLE")
+    report_reason = data.get("report_reason", "Vehicle detected operating on public road without mandatory insurance (MV Act Sec 196)")
+    severity = data.get("severity", "HIGH")
+    detected_at = data.get("detected_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM ministry_report").fetchone()[0] + 1
+        year = datetime.now().year
+        ref = f"ECHALLAN-{year}-{count:06d}"
+        
+        conn.execute(
+            """
+            INSERT INTO ministry_report
+                (vehicle_identifier, report_type, report_reason, detected_at, severity, report_status, submitted_at, ministry_reference)
+            VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?)
+            """,
+            (clean_id, report_type, report_reason, detected_at, severity, submitted_at, ref)
+        )
+        conn.commit()
+        last_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    # Webhook ping to Mediator to invalidate cache for this vehicle
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:5001/api/v1/sync/invalidate",
+            data=json.dumps({"vehicle_identifier": clean_id, "reason": "NEW_ECHALLAN_ISSUED"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=1.0)
+    except Exception:
+        pass  # Mediator might be starting or offline
+
+    return jsonify({
+        "message": "e-Challan issued successfully",
+        "report_id": last_id,
+        "ministry_reference": ref,
+        "vehicle_identifier": clean_id,
+        "status": "SUBMITTED",
+        "fine_amount": 2000,
+        "legal_section": "Motor Vehicles Act Section 196"
+    }), 201
+
+@app.route("/api/v1/challans/<int:report_id>/status", methods=["PUT"])
+def update_challan_status(report_id):
+    data = request.get_json(force=True)
+    new_status = data.get("status", "UNDER_REVIEW").upper()
+    valid_statuses = ["SUBMITTED", "UNDER_REVIEW", "FINED", "RESOLVED", "CLOSED"]
+    if new_status not in valid_statuses:
+        return jsonify({"error": f"Invalid status. Must be one of {valid_statuses}"}), 400
+
+    with get_db() as conn:
+        row = conn.execute("SELECT vehicle_identifier FROM ministry_report WHERE report_id = ?", (report_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "Challan record not found"}), 404
+        vehicle_id = row[0]
+        
+        conn.execute("UPDATE ministry_report SET report_status = ? WHERE report_id = ?", (new_status, report_id))
+        conn.commit()
+
+    # Invalidate cache for vehicle
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:5001/api/v1/sync/invalidate",
+            data=json.dumps({"vehicle_identifier": vehicle_id, "reason": "STATUS_CHANGED"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=1.0)
+    except Exception:
+        pass
+
+    return jsonify({"message": f"Challan {report_id} status updated to {new_status}", "report_id": report_id, "status": new_status})
+
+@app.route("/api/v1/challans", methods=["GET"])
+def list_challans():
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 20))
+    offset = max(0, (page - 1) * limit)
+    status = request.args.get("status")
+
+    conditions = []
+    params = []
+    if status:
+        conditions.append("report_status = ?")
+        params.append(status.upper())
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    with get_db() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM ministry_report {where}", tuple(params)).fetchone()[0]
+        rows = conn.execute(
+            f"""
+            SELECT report_id, vehicle_identifier, report_type, report_reason,
+                   detected_at, severity, report_status, submitted_at, ministry_reference
+            FROM ministry_report
+            {where}
+            ORDER BY submitted_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params) + (limit, offset)
+        ).fetchall()
+
+    return jsonify({
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit if total > 0 else 1,
+        "challans": [dict(r) for r in rows]
+    })
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT_ECHALLAN", 5006))
+    print(f"[*] Starting MoRTH e-Challan Microservice on port {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False)

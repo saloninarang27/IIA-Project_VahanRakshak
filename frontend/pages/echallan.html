@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-Challan Portal | VahanRakshak</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <a href="/" class="brand-wrapper">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">🏠 Dashboard</a>
+      <a href="/pages/inspector.html">🔍 Vehicle Inspector</a>
+      <a href="/pages/fleet.html">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html" class="active">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <main class="content-area">
+
+    <div class="glass-card" style="margin-bottom: 2rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
+        <div>
+          <h2 style="font-size:1.5rem; font-weight:800;">🏛️ MoRTH E-Challan & Notice Dispatch Portal</h2>
+          <p style="font-size:0.85rem; color:var(--text-muted);">
+            Automated ticket issuance for vehicles detected on public roads without mandatory insurance (MV Act Section 196) or flagged stolen
+          </p>
+        </div>
+        <button class="btn btn-primary" id="btn-issue-custom-challan">
+          ➕ Issue E-Challan Notice
+        </button>
+      </div>
+
+      <!-- Compliance Summary Bar -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+        <div class="stat-card danger" style="border-top-width: 4px; padding: 1.15rem;">
+          <div class="stat-label">Statutory Penalty</div>
+          <div class="stat-value" style="font-size:1.35rem; color:var(--status-danger);">₹2,000 / Court Notice</div>
+          <div class="stat-subtext">First offense under Section 196</div>
+        </div>
+        <div class="stat-card info" style="border-top-width: 4px; padding: 1.15rem;">
+          <div class="stat-label">Cache Sync Hook</div>
+          <div class="stat-value" style="font-size:1.35rem; color:var(--accent-primary);">Automated Purge</div>
+          <div class="stat-subtext">Invalidates Mediator cache upon update</div>
+        </div>
+        <div class="stat-card success" style="border-top-width: 4px; padding: 1.15rem;">
+          <div class="stat-label">Issuing Authority</div>
+          <div class="stat-value" style="font-size:1.35rem; color:var(--status-success);">MoRTH / Traffic Police</div>
+          <div class="stat-subtext">Central e-Challan System</div>
+        </div>
+      </div>
+
+
+      <!-- Filter Controls -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <span style="font-size:0.85rem; color:var(--text-muted);">Filter Status:</span>
+          <select id="challan-status-filter" class="search-input" style="padding:0.4rem 0.8rem; font-size:0.85rem; width:180px;">
+            <option value="">All Statuses</option>
+            <option value="SUBMITTED">Submitted</option>
+            <option value="UNDER_REVIEW">Under Review</option>
+            <option value="FINED">Fined</option>
+            <option value="RESOLVED">Resolved / Closed</option>
+          </select>
+        </div>
+        <span class="badge badge-info">Port 5006 Microservice API</span>
+      </div>
+
+      <!-- Challan Table -->
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Notice Reference</th>
+              <th>Vehicle Registration</th>
+              <th>Violation Category</th>
+              <th>Dispatched Date</th>
+              <th>Severity</th>
+              <th>Status Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="challan-tbody">
+            <!-- Populated dynamically by echallan.js -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="app-footer">
+    <div>VahanRakshak • MoRTH E-Challan Portal</div>
+    <div class="footer-tags">
+      <span class="footer-tag">MV Act Section 196</span>
+      <span class="footer-tag">Independent DB 5</span>
+      <span class="footer-tag">Status Synchronization</span>
+    </div>
+  </footer>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/echallan.js"></script>
+</body>
+</html>

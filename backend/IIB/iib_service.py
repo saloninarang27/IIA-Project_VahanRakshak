@@ -1,0 +1,103 @@
+"""
+IIB (Insurance Information Bureau of India - IRDAI) Microservice.
+Operates on its own local database (insurance_iib.db).
+Local vehicle identifier column: registration_no.
+Runs independently on Port 5002.
+"""
+import os
+import sqlite3
+from datetime import datetime
+from flask import Flask, request, jsonify, make_response
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insurance_iib.db")
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+@app.route("/api/v1/health", methods=["GET"])
+def health():
+    with get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM insurance_policy").fetchone()[0]
+    return jsonify({
+        "status": "UP",
+        "service": "IIB (Insurance Information Bureau of India)",
+        "agency": "IRDAI",
+        "local_identifier": "registration_no",
+        "records_count": count
+    })
+
+@app.route("/api/v1/policies/<registration_no>", methods=["GET"])
+def get_policies_for_vehicle(registration_no):
+    reg_clean = registration_no.strip().upper().replace(" ", "").replace("-", "")
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT policy_id, registration_no, insurer_name, policy_number,
+                   policy_start_date, policy_expiry_date, insurance_status, policy_type
+            FROM insurance_policy
+            WHERE registration_no = ?
+            ORDER BY policy_expiry_date DESC
+            """,
+            (reg_clean,)
+        ).fetchall()
+        
+    policies = [dict(r) for r in rows]
+    
+    from datetime import timezone
+    last_mod = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    
+    # Conditional ETag / If-Modified-Since support
+    if_mod = request.headers.get("If-Modified-Since")
+    if if_mod and not request.args.get("force"):
+        # Simulated 304 when client asks if unchanged
+        pass # In real API check timestamp
+
+    resp = make_response(jsonify({
+        "agency": "IIB_IRDAI",
+        "query_key": "registration_no",
+        "registration_no": reg_clean,
+        "count": len(policies),
+        "policies": policies
+    }))
+    resp.headers["Last-Modified"] = last_mod
+    return resp
+
+@app.route("/api/v1/policies", methods=["POST"])
+def create_policy():
+    data = request.get_json(force=True)
+    required = ["registration_no", "insurer_name", "policy_number", "policy_start_date", "policy_expiry_date", "insurance_status"]
+    for f in required:
+        if f not in data:
+            return jsonify({"error": f"Missing required field: {f}"}), 400
+            
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO insurance_policy
+                (registration_no, insurer_name, policy_number, policy_start_date, policy_expiry_date, insurance_status, policy_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                data["registration_no"].strip().upper().replace(" ", "").replace("-", ""),
+                data["insurer_name"],
+                data["policy_number"],
+                data["policy_start_date"],
+                data["policy_expiry_date"],
+                data["insurance_status"].upper(),
+                data.get("policy_type", "Comprehensive")
+            )
+        )
+        conn.commit()
+    return jsonify({"message": "Policy created successfully", "policy_number": data["policy_number"]}), 201
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT_IIB", 5002))
+    print(f"[*] Starting IIB Microservice on port {port}...")
+    app.run(host="0.0.0.0", port=port, debug=False)

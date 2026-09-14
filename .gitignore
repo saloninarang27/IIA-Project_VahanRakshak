@@ -1,16 +1,24 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environments
-venv/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
 .venv/
-env/
-ENV/
+venv/
 
-# IDE & OS files
-.vscode/
-.idea/
+# Generated databases (regenerate with: python setup.py)
+data/*.db
+backend/**/*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# OS / editor
 .DS_Store
 Thumbs.db
+.vscode/
+
+# PDF reports
+*.pdf
+

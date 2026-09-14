@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fleet Intelligence | VahanRakshak</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <a href="/" class="brand-wrapper">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">🏠 Dashboard</a>
+      <a href="/pages/inspector.html">🔍 Vehicle Inspector</a>
+      <a href="/pages/fleet.html" class="active">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <main class="content-area">
+
+    <div class="glass-card" style="margin-bottom: 2rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
+        <div>
+          <h2 style="font-size:1.5rem; font-weight:800;">📋 Fleet Intelligence & Detection Log</h2>
+          <p style="font-size:0.85rem; color:var(--text-muted);">
+            High-performance server-side SQL pagination and filtering on the central Kimball Data Warehouse (no memory dumps)
+          </p>
+        </div>
+        <span class="badge badge-success" id="fleet-latency-badge">⚡ Sub-5ms Server Query</span>
+      </div>
+
+      <!-- Filter Controls Grid -->
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+        <div>
+          <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Search Plate or Model</label>
+          <input type="text" id="filter-search" class="search-input" style="padding:0.6rem 0.8rem; font-size:0.9rem;" placeholder="e.g. DL01 or Swift">
+        </div>
+
+        <div>
+          <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Insurance Status</label>
+          <select id="filter-insurance" class="search-input" style="padding:0.6rem 0.8rem; font-size:0.88rem;">
+            <option value="All">All Insurance Statuses</option>
+            <option value="INSURED">Insured</option>
+            <option value="EXPIRED">Expired</option>
+            <option value="UNINSURED">Uninsured</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Theft / Scrapping</label>
+          <select id="filter-theft" class="search-input" style="padding:0.6rem 0.8rem; font-size:0.88rem;">
+            <option value="All">All Theft / Scrap Records</option>
+            <option value="STOLEN">Stolen Only</option>
+            <option value="SCRAPPED">Scrapped Only</option>
+            <option value="NONE">Clean Record</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.35rem;">Camera Checkpoint / City</label>
+          <select id="filter-location" class="search-input" style="padding:0.6rem 0.8rem; font-size:0.88rem;">
+            <option value="All">All Checkpoints</option>
+            <option value="Delhi">Delhi</option>
+            <option value="Gurugram">Gurugram</option>
+            <option value="Noida">Noida</option>
+            <option value="Bengaluru">Bengaluru</option>
+            <option value="Mumbai">Mumbai</option>
+            <option value="Hyderabad">Hyderabad</option>
+            <option value="Chennai">Chennai</option>
+            <option value="Kolkata">Kolkata</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Paginated Data Table -->
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Plate Number</th>
+              <th>Vehicle Description</th>
+              <th>Camera Sighting Location</th>
+              <th>Timestamp</th>
+              <th>Insurance Status</th>
+              <th>Theft Status</th>
+              <th>Risk Level</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="fleet-tbody">
+            <!-- Dynamically loaded by fleet.js -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Controls Bar -->
+      <div class="pagination-bar">
+        <div class="page-indicator" id="fleet-page-indicator">Loading page info...</div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn btn-secondary btn-sm" id="btn-prev-page">⬅ Previous</button>
+          <button class="btn btn-secondary btn-sm" id="btn-next-page">Next ➡</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="app-footer">
+    <div>VahanRakshak • Fleet Intelligence Platform</div>
+    <div class="footer-tags">
+      <span class="footer-tag">SQL LIMIT / OFFSET</span>
+      <span class="footer-tag">Zero Full-Table Dump</span>
+      <span class="footer-tag">Star-Schema Join</span>
+    </div>
+  </footer>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/fleet.js"></script>
+</body>
+</html>
