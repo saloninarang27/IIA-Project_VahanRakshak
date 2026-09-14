@@ -21,7 +21,7 @@
 | 1 | `MT25007` | **Aastha Kalbhor** | M.Tech CSE |
 | 2 | `MT25015` | **Aniket Raj Singh** | M.Tech CSE |
 | 3 | `MT25063` | **Anurag Sharma** | M.Tech CSE |
-| 4 | `MT25081` | **Saloni Narang** | M.Tech CSE |
+| 4 | `MT25081` | **Saloni** | M.Tech CSE |
 
 **Project Title:** Identification of Uninsured Vehicles While They Are on the Road  
 **Course:** Information Integration & Analytics (IIA)
