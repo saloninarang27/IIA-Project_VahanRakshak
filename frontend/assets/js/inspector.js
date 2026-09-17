@@ -53,13 +53,55 @@ async function inspectVehicle(plate, forceSync = false) {
   const resultsContainer = document.getElementById('inspector-results');
   const emptyState = document.getElementById('inspector-empty');
   const loading = document.getElementById('inspector-loading');
+  const alertContainer = document.getElementById('inspector-network-alert');
 
   if (emptyState) emptyState.style.display = 'none';
   if (resultsContainer) resultsContainer.style.display = 'none';
   if (loading) loading.style.display = 'block';
+  if (alertContainer) {
+    alertContainer.style.display = 'none';
+    alertContainer.innerHTML = '';
+  }
 
   try {
     const res = await API.getVehicle(plate, forceSync);
+
+    // If completely failed and no cache exists
+    if (res.data.source === 'FEDERATION_FAILED' || !res.data.vehicle) {
+      if (loading) loading.style.display = 'none';
+      if (resultsContainer) resultsContainer.style.display = 'block';
+
+      if (alertContainer) {
+        alertContainer.style.display = 'block';
+        alertContainer.innerHTML = `
+          <div style="background:#fef2f2; border:1px solid #fecaca; padding:1.25rem; border-radius:var(--radius-md); margin-bottom:1.5rem; display:flex; align-items:flex-start; gap:0.85rem; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+            <span style="font-size:1.8rem; line-height:1;">❌</span>
+            <div style="flex:1;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+                <strong style="color:#991b1b; font-size:1rem;">Cannot Reach Backend APIs — No Local Cache Available</strong>
+                <span class="badge badge-danger">ALL SERVICES OFFLINE</span>
+              </div>
+              <div style="font-size:0.88rem; color:#b91c1c; margin-top:0.35rem; line-height:1.45;">
+                All 5 microservices at <code>${res.data.target_host || 'remote host'}</code> are offline or unreachable, and plate <strong>${plate}</strong> has never been cached in the local Data Warehouse.
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const dossierCard = document.getElementById('primary-dossier-card');
+      if (dossierCard) dossierCard.style.display = 'none';
+
+      const trace = await API.getFederatedTrace(plate).catch(() => null);
+      if (trace && trace.decomposed_queries) {
+        renderFederationTree(trace.decomposed_queries);
+      }
+      return;
+    }
+
+    const dossierCard = document.getElementById('primary-dossier-card');
+    if (dossierCard) dossierCard.style.display = 'block';
+
     const trace = await API.getFederatedTrace(plate);
 
     if (loading) loading.style.display = 'none';
@@ -76,12 +118,60 @@ function renderDossier(res, trace) {
   const v = res.data.vehicle;
   const source = res.data.source;
   const latency = res.data.query_latency_ms || res.data.federation_latency_ms || res.clientLatencyMs;
+  const failedCount = res.data.failed_count || 0;
+  const targetHost = res.data.target_host || 'remote host';
+
+  // Offline / Fallback Warning Banner
+  const alertContainer = document.getElementById('inspector-network-alert');
+  if (alertContainer) {
+    if (source === 'CACHE_FALLBACK' || failedCount === 5) {
+      alertContainer.style.display = 'block';
+      alertContainer.innerHTML = `
+        <div style="background:#fffbeb; border:1px solid #fcd34d; padding:1.15rem 1.25rem; border-radius:var(--radius-md); margin-bottom:1.5rem; display:flex; align-items:flex-start; gap:0.85rem; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <span style="font-size:1.6rem; line-height:1;">⚠️</span>
+          <div style="flex:1;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+              <strong style="color:#92400e; font-size:0.95rem;">Cannot Reach Backend APIs — Displaying Local Cached Record</strong>
+              <span class="badge badge-danger" style="font-size:0.75rem;">HOST UNREACHABLE (${targetHost})</span>
+            </div>
+            <div style="font-size:0.85rem; color:#b45309; margin-top:0.35rem; line-height:1.45;">
+              The 5 backend microservices at <code>${targetHost}</code> could not be reached (all requests timed out or connection refused).
+              Vehicle Sentinel's <strong>Fault-Tolerant Cache-Aside Engine</strong> prevented data loss and served the last verified vehicle dossier from the <strong>Local Kimball Star Schema Data Warehouse</strong>.
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (source === 'PARTIAL_FEDERATION') {
+      alertContainer.style.display = 'block';
+      alertContainer.innerHTML = `
+        <div style="background:#fef3c7; border:1px solid #fcd34d; padding:0.9rem 1.2rem; border-radius:var(--radius-md); margin-bottom:1.25rem; display:flex; align-items:flex-start; gap:0.75rem;">
+          <span style="font-size:1.4rem; line-height:1;">⚠️</span>
+          <div style="flex:1;">
+            <strong style="color:#92400e; font-size:0.9rem;">Partial Federation: ${failedCount}/5 Services Offline</strong>
+            <div style="font-size:0.83rem; color:#b45309; margin-top:0.25rem;">
+              Some remote services were unreachable. Available live data was merged with cached attributes from the local warehouse.
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      alertContainer.style.display = 'none';
+      alertContainer.innerHTML = '';
+    }
+  }
 
   // Header badges
   document.getElementById('res-plate').textContent = v.vehicle_identifier;
-  document.getElementById('res-source-badge').innerHTML = source === 'CACHE_HIT'
-    ? `<span class="badge badge-success">⚡ Cache Hit (${latency}ms)</span>`
-    : `<span class="badge badge-purple">🌐 Live 5-API Federation (${latency}ms)</span>`;
+  const sourceBadge = document.getElementById('res-source-badge');
+  if (source === 'CACHE_FALLBACK') {
+    sourceBadge.innerHTML = `<span class="badge" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-weight:600;">⚠️ Host Offline • Cached DWH (${latency}ms)</span>`;
+  } else if (source === 'CACHE_HIT') {
+    sourceBadge.innerHTML = `<span class="badge badge-success">⚡ Cache Hit (${latency}ms)</span>`;
+  } else if (source === 'PARTIAL_FEDERATION') {
+    sourceBadge.innerHTML = `<span class="badge badge-warning">⚠️ Partial Live Federation (${latency}ms)</span>`;
+  } else {
+    sourceBadge.innerHTML = `<span class="badge badge-purple">🌐 Live 5-API Federation (${latency}ms)</span>`;
+  }
   
   document.getElementById('res-risk-badge').innerHTML = getRiskBadge(v.risk_level);
   document.getElementById('res-insurance-badge').innerHTML = getInsuranceBadge(v.insurance_status);
@@ -161,28 +251,59 @@ function renderDossier(res, trace) {
     }
   }
 
+  // Update Visualizer Header Badge
+  const fedBadge = document.getElementById('federation-status-badge');
+  if (fedBadge) {
+    if (source === 'CACHE_FALLBACK' || failedCount === 5) {
+      fedBadge.className = 'badge badge-danger';
+      fedBadge.textContent = `Backend APIs Offline (5/5 Failed at ${targetHost})`;
+    } else if (failedCount > 0) {
+      fedBadge.className = 'badge badge-warning';
+      fedBadge.textContent = `${failedCount}/5 Services Offline`;
+    } else {
+      fedBadge.className = 'badge badge-success';
+      fedBadge.textContent = 'Federation Operational (5/5 Online)';
+    }
+  }
+
   // Render Federation Tree
-  renderFederationTree(trace.decomposed_queries);
+  if (trace && trace.decomposed_queries) {
+    renderFederationTree(trace.decomposed_queries);
+  }
 }
 
 function renderFederationTree(queries) {
   const container = document.getElementById('federation-cards-container');
   if (!container) return;
 
-  container.innerHTML = Object.entries(queries).map(([key, q]) => `
-    <div class="agency-card">
-      <div class="agency-header">
-        <span class="agency-name">${q.agency}</span>
-        <span class="badge badge-success">${q.latency_ms}ms</span>
+  container.innerHTML = Object.entries(queries).map(([key, q]) => {
+    const isOnline = (q.status === 200) && !q.error;
+    const badgeHtml = isOnline
+      ? `<span class="badge badge-success">${q.latency_ms}ms</span>`
+      : `<span class="badge badge-danger">OFFLINE (${q.status || 503})</span>`;
+
+    const errorHtml = (!isOnline && q.error)
+      ? `<div style="background:#fef2f2; border:1px solid #fecaca; border-radius:4px; padding:0.35rem 0.5rem; color:#b91c1c; font-size:0.75rem; margin-top:0.4rem; word-break:break-word;">
+           ⚠️ <strong>Connection Error:</strong> ${q.error}
+         </div>`
+      : '';
+
+    return `
+      <div class="agency-card" style="${isOnline ? '' : 'border-color:#fca5a5; background:#fffafb;'}">
+        <div class="agency-header">
+          <span class="agency-name">${q.agency}</span>
+          ${badgeHtml}
+        </div>
+        <div class="agency-meta">Key: <code>${q.local_attribute}</code></div>
+        <div class="agency-query-badge" style="word-break:break-all;">${q.endpoint}</div>
+        ${errorHtml}
+        <details style="margin-top:0.5rem; font-size:0.75rem; color:var(--text-muted);">
+          <summary style="cursor:pointer; color:var(--accent-primary);">View Raw Response</summary>
+          <pre style="background:#f8fafc; border:1px solid var(--border-subtle); color:var(--text-primary); padding:0.5rem; border-radius:4px; margin-top:0.25rem; max-height:120px; overflow-y:auto; font-family:var(--font-mono);">${JSON.stringify(q.response || { error: q.error }, null, 2)}</pre>
+        </details>
       </div>
-      <div class="agency-meta">Key: <code>${q.local_attribute}</code></div>
-      <div class="agency-query-badge" style="word-break:break-all;">${q.endpoint}</div>
-      <details style="margin-top:0.5rem; font-size:0.75rem; color:var(--text-muted);">
-        <summary style="cursor:pointer; color:var(--accent-primary);">View Raw Response</summary>
-        <pre style="background:#f8fafc; border:1px solid var(--border-subtle); color:var(--text-primary); padding:0.5rem; border-radius:4px; margin-top:0.25rem; max-height:120px; overflow-y:auto; font-family:var(--font-mono);">${JSON.stringify(q.response, null, 2)}</pre>
-      </details>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function triggerIssueChallan(plate) {

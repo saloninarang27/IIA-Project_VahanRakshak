@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distributed SQL REPL | VahanRakshak</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+  <style>
+    .repl-layout {
+      display: grid;
+      gap: 1.5rem;
+    }
+    .auth-gate-box {
+      max-width: 520px;
+      margin: 3rem auto;
+      text-align: center;
+      padding: 2.5rem 2rem;
+    }
+    .auth-icon-circle {
+      width: 64px;
+      height: 64px;
+      background: var(--bg-subtle);
+      border: 2px solid var(--accent-primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      margin: 0 auto 1.25rem auto;
+    }
+    .db-selector-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .db-card-btn {
+      background: #ffffff;
+      border: 2px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      padding: 0.85rem 1rem;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .db-card-btn:hover {
+      border-color: var(--accent-primary);
+      transform: translateY(-1px);
+    }
+    .db-card-btn.active {
+      border-color: var(--accent-primary);
+      background: #eff6ff;
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+    }
+    .db-card-title {
+      font-weight: 700;
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .db-card-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+      font-family: var(--font-mono);
+    }
+    .sql-editor-card {
+      background: #0f172a;
+      border-radius: var(--radius-lg);
+      border: 1px solid #1e293b;
+      overflow: hidden;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.25);
+    }
+    .sql-editor-header {
+      background: #1e293b;
+      padding: 0.65rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+    .editor-tab-title {
+      color: #94a3b8;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .sql-textarea {
+      width: 100%;
+      min-height: 140px;
+      background: #0f172a;
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-size: 0.92rem;
+      line-height: 1.6;
+      padding: 1rem;
+      border: none;
+      resize: vertical;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .sql-textarea::placeholder {
+      color: #475569;
+    }
+    .sql-editor-footer {
+      background: #1e293b;
+      padding: 0.65rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid #334155;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .hop-pipeline-card {
+      background: #f8fafc;
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      padding: 0.85rem 1.15rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      font-size: 0.82rem;
+    }
+    .hop-node {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-weight: 600;
+    }
+    .hop-arrow {
+      color: var(--accent-primary);
+      font-weight: 700;
+    }
+    .telemetry-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.75rem;
+      margin: 1rem 0;
+    }
+    .telemetry-item {
+      background: #ffffff;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.75rem 1rem;
+    }
+    .telemetry-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .telemetry-val {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-top: 0.2rem;
+      font-family: var(--font-mono);
+    }
+    .results-table-wrapper {
+      max-height: 420px;
+      overflow-x: auto;
+      overflow-y: auto;
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      background: #ffffff;
+    }
+    .repl-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      text-align: left;
+    }
+    .repl-table th {
+      background: var(--bg-subtle);
+      color: var(--text-primary);
+      font-weight: 700;
+      padding: 0.65rem 0.85rem;
+      border-bottom: 2px solid var(--border-medium);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    .repl-table td {
+      padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid var(--border-subtle);
+      white-space: nowrap;
+    }
+    .repl-table tr:hover {
+      background: #f8fafc;
+    }
+    .null-cell {
+      color: var(--text-muted);
+      font-style: italic;
+      background: #f1f5f9;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <a href="/" class="brand">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">🏠 Dashboard</a>
+      <a href="/pages/inspector.html">🔍 Vehicle Inspector</a>
+      <a href="/pages/fleet.html">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+      <a href="/pages/repl.html" class="active">💻 SQL REPL</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="content-area">
+
+    <!-- Page Title & Header -->
+    <div style="margin-bottom: 1.5rem; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:1rem;">
+      <div>
+        <h2 style="font-size: 1.75rem; font-weight: 800; letter-spacing: -0.02em;">
+          💻 Distributed SQL REPL Console
+        </h2>
+        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem;">
+          Direct multi-hop SQL query terminal executing across distributed microservice databases via Central Mediator APIs.
+        </p>
+      </div>
+      <div id="auth-status-chip" style="display:none;">
+        <span class="badge badge-success" style="padding:0.4rem 0.75rem; font-size:0.8rem; display:inline-flex; align-items:center; gap:0.4rem;">
+          <span>🟢</span> Operator Authenticated: <strong id="operator-display-name">admin</strong>
+        </span>
+        <button class="btn btn-secondary btn-sm" id="btn-logout" style="margin-left:0.5rem;">Lock Console</button>
+      </div>
+    </div>
+
+    <!-- Section 1: Authentication Lock Screen (Shown when not authenticated) -->
+    <div id="repl-auth-gate" class="glass-card auth-gate-box">
+      <div class="auth-icon-circle">🔐</div>
+      <h3 style="font-size:1.35rem; font-weight:700; margin-bottom:0.4rem;">Privileged REPL Access Required</h3>
+      <p style="color:var(--text-secondary); font-size:0.88rem; margin-bottom:1.5rem; line-height:1.5;">
+        Direct database querying across distributed agency microservices requires verified system administrator credentials.
+      </p>
+
+      <div id="auth-error-banner" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:0.65rem 0.85rem; border-radius:var(--radius-sm); font-size:0.83rem; margin-bottom:1rem; text-align:left;"></div>
+
+      <div style="text-align:left; margin-bottom:1rem;">
+        <label style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:0.35rem;">Operator ID / Username</label>
+        <input type="text" id="repl-username" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="admin" value="admin">
+      </div>
+
+      <div style="text-align:left; margin-bottom:1.5rem;">
+        <label style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:0.35rem;">Password</label>
+        <input type="password" id="repl-password" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="••••••••••••" value="sentinel2026">
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:0.75rem;">
+        <button class="btn btn-primary" id="btn-unlock-repl" style="width:100%; padding:0.75rem; font-size:0.95rem;">
+          🔓 Authenticate & Unlock REPL
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btn-demo-credentials" style="width:100%;">
+          ⚡ Fill Demo Operator Credentials (admin / sentinel2026)
+        </button>
+      </div>
+    </div>
+
+    <!-- Section 2: Active REPL Workbench (Shown when authenticated) -->
+    <div id="repl-workbench" class="repl-layout" style="display:none;">
+
+      <!-- Live Multi-Hop Architecture Flow Banner -->
+      <div class="hop-pipeline-card">
+        <div class="hop-node">
+          <span>🌐</span> <strong>1. Browser Client</strong>
+        </div>
+        <div class="hop-arrow">───[ HTTP POST /api/v1/sql/execute ]───►</div>
+        <div class="hop-node">
+          <span>🛰️</span> <strong>2. Central Mediator (5001)</strong>
+        </div>
+        <div class="hop-arrow">───[ HTTP POST /api/v1/internal/execute-sql ]───►</div>
+        <div class="hop-node">
+          <span>🏢</span> <strong id="flow-microservice-label">3. Target Microservice API</strong>
+        </div>
+        <div class="hop-arrow">───[ PRAGMA WAL ]───►</div>
+        <div class="hop-node">
+          <span>🗄️</span> <strong id="flow-db-label">4. Local SQLite DB</strong>
+        </div>
+      </div>
+
+      <!-- Target Agency Database Selector -->
+      <div class="glass-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
+          <h4 style="font-size:0.92rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary);">
+            Select Target Database / Microservice Node
+          </h4>
+          <span id="target-host-indicator" class="badge badge-purple" style="font-size:0.78rem;">
+            Resolving node location...
+          </span>
+        </div>
+
+        <div class="db-selector-grid">
+          <button class="db-card-btn active" data-target="vahan" data-db="parivahan_vahan.db" data-port="5003" data-agency="MoRTH VAHAN Registry">
+            <div class="db-card-title">
+              <span>🚗 MoRTH VAHAN</span>
+              <span class="badge badge-success">Port 5003</span>
+            </div>
+            <div class="db-card-sub">parivahan_vahan.db</div>
+          </button>
+
+          <button class="db-card-btn" data-target="iib" data-db="insurance_iib.db" data-port="5002" data-agency="IRDAI Insurance (IIB)">
+            <div class="db-card-title">
+              <span>🛡️ IRDAI IIB</span>
+              <span class="badge badge-success">Port 5002</span>
+            </div>
+            <div class="db-card-sub">insurance_iib.db</div>
+          </button>
+
+          <button class="db-card-btn" data-target="police" data-db="theft_scrap.db" data-port="5004" data-agency="Police CCTNS & RVSF">
+            <div class="db-card-title">
+              <span>🚨 Police CCTNS</span>
+              <span class="badge badge-success">Port 5004</span>
+            </div>
+            <div class="db-card-sub">theft_scrap.db</div>
+          </button>
+
+          <button class="db-card-btn" data-target="anpr" data-db="vehicle_capture.db" data-port="5005" data-agency="Highway Toll ANPR Cameras">
+            <div class="db-card-title">
+              <span>📷 Highway ANPR</span>
+              <span class="badge badge-success">Port 5005</span>
+            </div>
+            <div class="db-card-sub">vehicle_capture.db</div>
+          </button>
+
+          <button class="db-card-btn" data-target="echallan" data-db="ministry_echallan.db" data-port="5006" data-agency="MoRTH e-Challan Portal">
+            <div class="db-card-title">
+              <span>📋 MoRTH e-Challan</span>
+              <span class="badge badge-success">Port 5006</span>
+            </div>
+            <div class="db-card-sub">ministry_echallan.db</div>
+          </button>
+
+          <button class="db-card-btn" data-target="dwh" data-db="warehouse_dwh.db" data-port="5001" data-agency="Central Star Schema DWH">
+            <div class="db-card-title">
+              <span>⭐ Central DWH Cache</span>
+              <span class="badge badge-purple">Port 5001</span>
+            </div>
+            <div class="db-card-sub">warehouse_dwh.db</div>
+          </button>
+        </div>
+
+        <!-- Quick Sample Queries Chips -->
+        <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-top:0.25rem;">
+          <span style="font-size:0.8rem; font-weight:600; color:var(--text-muted);">Quick Sample Queries:</span>
+          <div id="sample-queries-chips" style="display:inline-flex; gap:0.4rem; flex-wrap:wrap;">
+            <!-- Injected by repl.js based on active target -->
+          </div>
+        </div>
+      </div>
+
+      <!-- SQL Terminal Editor -->
+      <div class="sql-editor-card">
+        <div class="sql-editor-header">
+          <div class="editor-tab-title">
+            <span>⚡</span>
+            <span id="editor-tab-label">Querying parivahan_vahan.db via MoRTH VAHAN (5003)</span>
+          </div>
+          <div style="font-size:0.75rem; color:#64748b; font-family:var(--font-mono);">
+            Press <strong>Ctrl+Enter</strong> or <strong>Cmd+Enter</strong> to execute
+          </div>
+        </div>
+
+        <textarea id="sql-query-input" class="sql-textarea" spellcheck="false" placeholder="Enter SQL query here... (e.g. SELECT * FROM vehicle_registration LIMIT 10;)"></textarea>
+
+        <div class="sql-editor-footer">
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn btn-primary btn-sm" id="btn-run-query" style="background:#2563eb;">
+              ▶️ Execute SQL Query
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-clear-query" style="background:#334155; color:#f8fafc; border-color:#475569;">
+              🧹 Clear
+            </button>
+          </div>
+          <div style="font-size:0.78rem; color:#94a3b8; display:flex; align-items:center; gap:0.5rem;">
+            <span>Target Engine:</span>
+            <span class="badge" style="background:#334155; color:#38bdf8; font-family:var(--font-mono);" id="editor-engine-badge">
+              SQLite (WAL Mode)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Execution Telemetry & Hop Status -->
+      <div id="execution-telemetry-box" style="display:none;">
+        <div class="telemetry-bar">
+          <div class="telemetry-item">
+            <div class="telemetry-label">Target Host / IP</div>
+            <div class="telemetry-val" id="tel-target-host" style="font-size:0.95rem;">127.0.0.1</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="telemetry-label">Deployment Mode</div>
+            <div class="telemetry-val" id="tel-remote-mode" style="font-size:0.95rem;">LOCAL HOST</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="telemetry-label">Total E2E Latency</div>
+            <div class="telemetry-val" id="tel-e2e-latency" style="color:var(--accent-primary);">-- ms</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="telemetry-label">Mediator ➔ API Hop</div>
+            <div class="telemetry-val" id="tel-hop-latency">-- ms</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="telemetry-label">SQLite Engine Exec</div>
+            <div class="telemetry-val" id="tel-db-exec">-- ms</div>
+          </div>
+          <div class="telemetry-item">
+            <div class="telemetry-label">Rows Returned</div>
+            <div class="telemetry-val" id="tel-row-count" style="color:#16a34a;">0</div>
+          </div>
+        </div>
+
+        <!-- Audit Trace Collapsible -->
+        <details style="background:#f8fafc; border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:0.6rem 0.85rem; font-size:0.8rem; margin-bottom:1rem;">
+          <summary style="cursor:pointer; font-weight:600; color:var(--text-secondary);">
+            🔍 View Distributed Multi-Hop Audit Trace
+          </summary>
+          <div id="hop-audit-trace" style="margin-top:0.5rem; font-family:var(--font-mono); font-size:0.75rem; line-height:1.6; color:var(--text-primary);">
+            <!-- Populated dynamically -->
+          </div>
+        </details>
+      </div>
+
+      <!-- Query Results Section -->
+      <div class="glass-card" id="repl-results-card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
+          <h4 style="font-size:0.95rem; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:0.4rem;">
+            <span>📊</span> Result Set (<span id="results-count-badge">0 rows</span>)
+          </h4>
+          <div style="display:flex; gap:0.5rem;">
+            <button class="btn btn-secondary btn-sm" id="btn-copy-json">📋 Copy JSON</button>
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-json">🔄 Toggle JSON View</button>
+          </div>
+        </div>
+
+        <!-- Error Container -->
+        <div id="repl-error-alert" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:1rem 1.25rem; border-radius:var(--radius-md); margin-bottom:1rem; font-family:var(--font-mono); font-size:0.85rem;">
+        </div>
+
+        <!-- Interactive Table Container -->
+        <div id="repl-table-container" class="results-table-wrapper">
+          <table class="repl-table" id="repl-data-table">
+            <thead id="repl-table-head"></thead>
+            <tbody id="repl-table-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Raw JSON Container -->
+        <pre id="repl-json-container" style="display:none; background:#0f172a; color:#38bdf8; padding:1rem; border-radius:var(--radius-md); max-height:400px; overflow-y:auto; font-family:var(--font-mono); font-size:0.8rem;"></pre>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="app-footer">
+    <div>VahanRakshak • Distributed SQL REPL Console</div>
+    <div class="footer-tags">
+      <span class="footer-tag">Multi-Hop Execution</span>
+      <span class="footer-tag">Remote Microservices</span>
+      <span class="footer-tag">SQLite WAL Engine</span>
+    </div>
+  </footer>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/repl.js"></script>
+</body>
+</html>

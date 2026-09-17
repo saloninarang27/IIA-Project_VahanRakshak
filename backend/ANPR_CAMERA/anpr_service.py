@@ -100,6 +100,52 @@ def list_captures():
         "captures": [dict(r) for r in rows]
     })
 
+import time
+
+@app.route("/api/v1/internal/execute-sql", methods=["POST"])
+def execute_sql():
+    """Internal SQL query execution endpoint for distributed REPL demo."""
+    data = request.get_json(force=True) or {}
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Empty SQL query"}), 400
+
+    start_t = time.time()
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(query)
+            if cur.description:
+                columns = [col[0] for col in cur.description]
+                rows = cur.fetchall()
+                results = [list(r) for r in rows]
+                row_count = len(results)
+            else:
+                conn.commit()
+                columns = ["affected_rows"]
+                results = [[cur.rowcount]]
+                row_count = cur.rowcount
+
+        elapsed = round((time.time() - start_t) * 1000, 2)
+        return jsonify({
+            "status": "success",
+            "service": "Highway Toll ANPR Camera Network",
+            "database": "vehicle_capture.db",
+            "execution_ms": elapsed,
+            "columns": columns,
+            "rows": results,
+            "row_count": row_count
+        })
+    except Exception as e:
+        elapsed = round((time.time() - start_t) * 1000, 2)
+        return jsonify({
+            "status": "error",
+            "service": "Highway Toll ANPR Camera Network",
+            "database": "vehicle_capture.db",
+            "execution_ms": elapsed,
+            "error": str(e)
+        }), 400
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT_ANPR", 5005))
     print(f"[*] Starting Highway ANPR Camera Microservice on port {port}...")

@@ -22,3 +22,8 @@ Thumbs.db
 # PDF reports
 *.pdf
 
+# Local presentation, demo guide, and AI logs
+*.pptx
+revision.md
+.env
+AI_CHAT_HISTORY_AND_PROMPTS.*

@@ -56,5 +56,27 @@ const API = {
       body: JSON.stringify({ vehicle_identifier: plate })
     });
     return await res.json();
+  },
+
+  async verifySqlAuth(credentials) {
+    const res = await fetch(`${MEDIATOR_BASE_URL}/sql/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials)
+    });
+    const data = await res.json();
+    return { ok: res.ok, status: res.status, data };
+  },
+
+  async executeSql(payload) {
+    const start = performance.now();
+    const res = await fetch(`${MEDIATOR_BASE_URL}/sql/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const clientElapsed = Math.round(performance.now() - start);
+    const data = await res.json();
+    return { ok: res.ok, status: res.status, data, clientLatencyMs: clientElapsed };
   }
 };
