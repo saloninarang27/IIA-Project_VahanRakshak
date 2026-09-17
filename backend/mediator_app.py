@@ -607,6 +607,43 @@ def issue_echallan():
 
     return jsonify(challan_resp), 201
 
+@app.route("/api/v1/echallan/challans", methods=["GET"])
+def get_echallans_list():
+    """Proxies challan listing to the ECHALLAN service (local or remote)."""
+    page = request.args.get("page", 1)
+    limit = request.args.get("limit", 20)
+    status = request.args.get("status", "")
+    params = f"?page={page}&limit={limit}"
+    if status:
+        params += f"&status={status}"
+    url = f"{config.URL_ECHALLAN}/api/v1/challans{params}"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": f"Failed to connect to E-Challan service at {config.URL_ECHALLAN}: {str(e)}", "challans": [], "total": 0}), 502
+
+@app.route("/api/v1/echallan/challans/<int:report_id>/status", methods=["PUT"])
+def update_echallan_status(report_id):
+    """Proxies challan status update to the ECHALLAN service (local or remote)."""
+    data = request.get_json(force=True)
+    url = f"{config.URL_ECHALLAN}/api/v1/challans/{report_id}/status"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(data).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="PUT"
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            res_data = json.loads(resp.read().decode("utf-8"))
+            return jsonify(res_data)
+    except Exception as e:
+        return jsonify({"error": f"Failed to update challan at {config.URL_ECHALLAN}: {str(e)}"}), 502
+
+
 # ---------------------------------------------------------------------------
 # Distributed Interactive SQL REPL Endpoints
 # ---------------------------------------------------------------------------

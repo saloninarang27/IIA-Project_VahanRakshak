@@ -23,14 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadChallans() {
   const tbody = document.getElementById('challan-tbody');
   const filter = document.getElementById('challan-status-filter')?.value || '';
-  const host = window.location.hostname || '127.0.0.1';
 
   if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">Fetching E-Challan records...</td></tr>`;
 
   try {
-    const url = `http://${host}:5006/api/v1/challans?page=${challanPage}&limit=15${filter ? `&status=${filter}` : ''}`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const data = await API.getChallans({ page: challanPage, limit: 15, status: filter });
 
     if (!data.challans || data.challans.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">No challans found.</td></tr>`;
@@ -76,14 +73,8 @@ function showChallanDetails(reportId) {
 }
 
 async function updateChallanStatus(reportId, newStatus) {
-  const host = window.location.hostname || '127.0.0.1';
   try {
-    const res = await fetch(`http://${host}:5006/api/v1/challans/${reportId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus })
-    });
-    const data = await res.json();
+    const data = await API.updateChallanStatus(reportId, newStatus);
     AppModal.alert("Status Updated", `Notice #${reportId} status changed to ${newStatus}.\nMediator cache has been purged automatically.`, "✅");
     loadChallans();
   } catch (err) {

@@ -40,6 +40,21 @@ const API = {
     return await res.json();
   },
 
+  async getChallans(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    const res = await fetch(`${MEDIATOR_BASE_URL}/echallan/challans${query ? `?${query}` : ''}`);
+    return await res.json();
+  },
+
+  async updateChallanStatus(reportId, status) {
+    const res = await fetch(`${MEDIATOR_BASE_URL}/echallan/challans/${reportId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    return await res.json();
+  },
+
   async issueEChallan(payload) {
     const res = await fetch(`${MEDIATOR_BASE_URL}/echallan/issue`, {
       method: 'POST',
