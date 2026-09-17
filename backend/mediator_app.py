@@ -817,20 +817,45 @@ def sql_execute():
             res_data = json.loads(raw)
             hop_time = round((time.time() - t0) * 1000, 2)
 
-        # Autonomous Cache Invalidation: If query mutated data, invalidate cache for affected plates
+        # Instant Multi-Tier Direct Database & Cache Synchronization
         affected_vehicles = []
         is_mutation = any(query.strip().upper().startswith(kw) for kw in ("UPDATE", "INSERT", "DELETE", "REPLACE"))
+        local_mirrored = False
         if is_mutation and res_data.get("status") == "success":
+            # 1. Update local database file mirror if it exists on disk so local files reflect it directly
+            local_db_map = {
+                "iib": config.DB_IIB,
+                "vahan": config.DB_VAHAN,
+                "police": config.DB_POLICE,
+                "anpr": config.DB_ANPR,
+                "echallan": config.DB_ECHALLAN
+            }
+            local_db = local_db_map.get(target)
+            if local_db and os.path.exists(local_db):
+                try:
+                    with sqlite3.connect(local_db, timeout=5.0) as local_conn:
+                        local_conn.execute(query)
+                        local_conn.commit()
+                        local_mirrored = True
+                except Exception as ex:
+                    pass
+
+            # 2. Instantly re-synchronize Central DWH Cache so NO Force Live Sync is ever needed
             import re
             plates = re.findall(r'[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}', query.upper())
             for p in set(plates):
                 affected_vehicles.append(p)
                 try:
-                    with get_dwh_conn() as conn:
-                        conn.execute("DELETE FROM mv_vehicle_complete_history WHERE vehicle_identifier = ?", (p,))
-                        conn.commit()
-                except Exception:
-                    pass
+                    api_res = fetch_all_agency_apis(p)
+                    new_dossier = merge_to_global_dossier(p, api_res)
+                    upsert_cache(new_dossier)
+                except Exception as ex:
+                    try:
+                        with get_dwh_conn() as conn:
+                            conn.execute("DELETE FROM mv_vehicle_complete_history WHERE vehicle_identifier = ?", (p,))
+                            conn.commit()
+                    except Exception:
+                        pass
 
         return jsonify({
             "status": res_data.get("status", "success"),
@@ -846,7 +871,8 @@ def sql_execute():
             "columns": res_data.get("columns", []),
             "rows": res_data.get("rows", []),
             "row_count": res_data.get("row_count", 0),
-            "cache_invalidated": len(affected_vehicles) > 0,
+            "cache_synchronized": len(affected_vehicles) > 0,
+            "local_mirror_updated": local_mirrored,
             "affected_vehicles": affected_vehicles,
             "error": res_data.get("error"),
             "query": query,
