@@ -817,6 +817,21 @@ def sql_execute():
             res_data = json.loads(raw)
             hop_time = round((time.time() - t0) * 1000, 2)
 
+        # Autonomous Cache Invalidation: If query mutated data, invalidate cache for affected plates
+        affected_vehicles = []
+        is_mutation = any(query.strip().upper().startswith(kw) for kw in ("UPDATE", "INSERT", "DELETE", "REPLACE"))
+        if is_mutation and res_data.get("status") == "success":
+            import re
+            plates = re.findall(r'[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}', query.upper())
+            for p in set(plates):
+                affected_vehicles.append(p)
+                try:
+                    with get_dwh_conn() as conn:
+                        conn.execute("DELETE FROM mv_vehicle_complete_history WHERE vehicle_identifier = ?", (p,))
+                        conn.commit()
+                except Exception:
+                    pass
+
         return jsonify({
             "status": res_data.get("status", "success"),
             "target": target_info["name"],
@@ -831,6 +846,8 @@ def sql_execute():
             "columns": res_data.get("columns", []),
             "rows": res_data.get("rows", []),
             "row_count": res_data.get("row_count", 0),
+            "cache_invalidated": len(affected_vehicles) > 0,
+            "affected_vehicles": affected_vehicles,
             "error": res_data.get("error"),
             "query": query,
             "trace": [
