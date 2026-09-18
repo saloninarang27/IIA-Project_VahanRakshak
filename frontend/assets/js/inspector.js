@@ -186,7 +186,9 @@ function renderDossier(res, trace) {
   // Registration
   document.getElementById('val-reg-status').innerHTML = v.registration_status === 'ACTIVE'
     ? '<span class="badge badge-success">ACTIVE</span>'
-    : '<span class="badge badge-warning">EXPIRED</span>';
+    : (v.registration_status === 'UNREGISTERED'
+        ? '<span class="badge badge-danger">UNREGISTERED</span>'
+        : `<span class="badge badge-warning">${v.registration_status || 'EXPIRED'}</span>`);
   document.getElementById('val-reg-date').textContent = v.registration_date || 'N/A';
   document.getElementById('val-reg-expiry').textContent = v.registration_expiry_date || 'N/A';
 

@@ -61,6 +61,31 @@ def _fetch_service(url, service_name):
                 "data": data,
                 "error": None
             }
+    except urllib.error.HTTPError as http_err:
+        elapsed_ms = round((time.time() - start) * 1000, 2)
+        # HTTP 404 means the agency microservice is online and responsive, but has no record for this plate
+        if http_err.code == 404:
+            try:
+                body = http_err.read().decode("utf-8")
+                err_data = json.loads(body) if body else None
+            except Exception:
+                err_data = None
+            return {
+                "service": service_name,
+                "url": url,
+                "status": 404,
+                "latency_ms": elapsed_ms,
+                "data": err_data,
+                "error": None
+            }
+        return {
+            "service": service_name,
+            "url": url,
+            "status": http_err.code,
+            "latency_ms": elapsed_ms,
+            "data": None,
+            "error": f"Service returned HTTP {http_err.code}: {http_err.reason}"
+        }
     except Exception as e:
         elapsed_ms = round((time.time() - start) * 1000, 2)
         
@@ -157,6 +182,8 @@ def merge_to_global_dossier(clean_plate, api_results):
         exp = parse_date(vahan_data.get("registration_expiry_date"))
         if exp and exp < config.SIMULATION_TODAY:
             reg_status = "EXPIRED"
+    elif api_results.get("vahan", {}).get("status") in (200, 404):
+        reg_status = "UNREGISTERED"
 
     risk_level = compute_risk_level(insurance_status, suspicion_status, was_captured_on_road)
     ministry_eval = compute_ministry_requirement(insurance_status, suspicion_status, reg_status, was_captured_on_road)
@@ -339,9 +366,9 @@ def get_vehicle(plate_number):
     api_results = fetch_all_agency_apis(clean_plate)
     elapsed_ms = round((time.time() - start) * 1000, 2)
 
-    # Analyze API outcomes
-    failed_services = [k for k, v in api_results.items() if v["status"] != 200]
-    successful_services = [k for k, v in api_results.items() if v["status"] == 200]
+    # Analyze API outcomes: 200 (record found) and 404 (vehicle not registered) are valid responsive outcomes
+    failed_services = [k for k, v in api_results.items() if v["status"] not in (200, 404)]
+    successful_services = [k for k, v in api_results.items() if v["status"] in (200, 404)]
     failed_count = len(failed_services)
     target_host = config.DEFAULT_HOST
 
