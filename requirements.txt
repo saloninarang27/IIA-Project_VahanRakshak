@@ -7,5 +7,9 @@ flask-cors>=4.0
 pillow>=10.1         # plate-image preprocessing & sample generation
 
 # Optional: server-side plate OCR (otherwise the web UI uses Tesseract.js in the browser)
+# Recommended - reads plates in full car photos:
+#   pip install rapidocr_onnxruntime
+#   (if onnxruntime crashes on import on Windows: pip install "onnxruntime==1.20.1")
+# Alternatives:
 # pytesseract>=0.3   # also needs the Tesseract binary on PATH
 # easyocr>=1.7

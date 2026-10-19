@@ -189,10 +189,31 @@ Inspector shows these as "did you mean" suggestions.
 
 ## OCR
 
-Server-side OCR is optional: `pip install pytesseract` plus the Tesseract binary on PATH, or `pip install easyocr`.
-Without either, the page runs **Tesseract.js 5.1.1** in the browser, loaded from jsDelivr on first use; this needs
-internet access the first time. Either way the raw text, engine and confidence are logged, and the reading can be
-edited before matching. `scripts/generate_plate_samples.py` regenerates the five sample plates in
+A photo contains far more text than the plate: car badges, dealer stickers, state names ("NEW YORK"), "TAXI",
+the "IND" strip and watermarks. OCR therefore runs in two stages:
+
+1. **Text detection + recognition.** Every text region becomes a detection (text, confidence, bounding box).
+2. **Plate selection** (`select_plate_text` in `matching/ocr.py`):
+   - drop mostly-lowercase words (watermarks, brand names, URLs);
+   - group detections into rows by vertical position and height;
+   - score every run of adjacent boxes in a row, since a plate is often split across boxes (`DL` + `1A B2345`).
+     Overlapping boxes don't duplicate characters;
+   - keep the run with the tallest characters, at least one digit, 4–11 characters and ideally an Indian
+     registration pattern. Stacked two-row (motorcycle) plates are joined.
+
+Engines, in order of preference:
+
+| Engine | Install | Notes |
+|---|---|---|
+| **RapidOCR** (recommended) | `pip install rapidocr_onnxruntime` | Detection-based, reads plates in full car photos. On some Windows machines newer `onnxruntime` builds crash on import; `pip install "onnxruntime==1.20.1"` works. The engine is import-tested in a subprocess first, so a broken build is skipped rather than crashing the Mediator. |
+| pytesseract | `pip install pytesseract` + Tesseract binary | Run in sparse-text mode (`--psm 11`). |
+| easyocr | `pip install easyocr` | Pulls in PyTorch. |
+| **Tesseract.js 5.1.1** (browser fallback) | none (jsDelivr, needs internet on first use) | Sparse-text mode plus a JS port of the same plate selection. It lacks the two-row join. |
+
+With RapidOCR, the plate is read correctly from all five reference photos that the old single-line OCR failed on: a full
+car photo, a watermarked stock image, an Azerbaijani plate, a temporary plate, and a New York taxi plate. It also reads
+all five samples. The page outlines the chosen plate on the uploaded image and offers the other plate-like readings as
+one-click alternatives. The raw text, engine and confidence are logged, and the reading can be edited before matching. `scripts/generate_plate_samples.py` regenerates the five sample plates in
 `frontend/assets/samples/`: clean, blurred, stylised O-for-0, skewed, and unregistered.
 
 ## Requirement traceability

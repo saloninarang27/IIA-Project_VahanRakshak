@@ -228,14 +228,16 @@ async function handleImage(file) {
   const content = document.getElementById('dropzone-content');
   const meta = document.getElementById('ocr-meta');
   const url = URL.createObjectURL(file);
-  content.innerHTML = `<img src="${url}" alt="Uploaded plate"><span style="font-size:0.78rem;">${esc(file.name)} — click to replace</span>`;
+  content.innerHTML = `<div class="ocr-preview"><img src="${url}" alt="Uploaded plate" id="ocr-preview-img"></div><span style="font-size:0.78rem;">${esc(file.name)} — click to replace</span>`;
   meta.innerHTML = '<span class="spinner-inline"></span> Running OCR on the server…';
 
   let result = null;
   try {
     const { ok, status, data } = await API.ocrPlateImage(file);
     if (ok) {
-      result = { engine: `server: ${data.engine}`, raw_text: data.raw_text, confidence: data.confidence };
+      result = { engine: `server: ${data.engine}`, raw_text: data.raw_text, confidence: data.confidence,
+        box: data.plate_box, imageSize: data.image_size, alternatives: data.alternatives || [],
+        detections: (data.detections || []).length };
     } else if (status === 501) {
       meta.innerHTML = '<span class="spinner-inline"></span> No server OCR engine installed — running Tesseract.js in the browser (first run downloads ~10 MB)…';
       result = await browserOcr(file, meta);
@@ -250,9 +252,24 @@ async function handleImage(file) {
   lastOcr = { engine: result.engine, raw_text: result.raw_text, confidence: result.confidence, file: file.name };
   document.getElementById('plate-input').value = result.raw_text.trim();
   updateNormalizedPreview();
-  meta.innerHTML = `OCR engine <strong>${esc(result.engine)}</strong> • raw text <span class="plate-text">"${esc(result.raw_text.trim())}"</span> • confidence ${fmt(result.confidence, 2)}`;
+  drawPlateBox(result.box, result.imageSize);
+  meta.innerHTML = `OCR engine <strong>${esc(result.engine)}</strong> • plate text <span class="plate-text">"${esc(result.raw_text.trim())}"</span> • confidence ${fmt(result.confidence, 2)}`
+    + (result.detections ? ` • ${result.detections} text region(s) found` : '');
+  if (result.alternatives && result.alternatives.length) {
+    meta.innerHTML += '<br>Other readings: ';
+    result.alternatives.slice(0, 3).forEach(a => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.style.cssText = 'font-size:0.7rem; padding:0.1rem 0.5rem; margin-right:0.3rem;';
+      chip.textContent = a.normalized;
+      chip.addEventListener('click', () => useOcrAlternative(a.text));
+      meta.appendChild(chip);
+    });
+  }
   if (!normalizePlate(result.raw_text)) {
-    meta.innerHTML += ' — <span style="color:var(--status-danger);">no characters recognised</span>';
+    meta.insertAdjacentHTML('beforeend', ' — <span style="color:var(--status-danger);">no plate-like text found; type the plate manually below</span>');
+    return;
   }
   runMatch();
 }
@@ -278,12 +295,138 @@ async function browserOcr(file, meta) {
         }
       },
     });
-    await tesseractWorker.setParameters({ tessedit_char_whitelist: `${PLATE_CHARSET} `, tessedit_pageseg_mode: '7' });
+    // Sparse text: find text anywhere in the photo instead of treating it as one line.
+    // No character whitelist - lower-case output is how watermarks and brand names get filtered out.
+    await tesseractWorker.setParameters({ tessedit_pageseg_mode: '11' });
   }
   const { data } = await tesseractWorker.recognize(file);
-  // Drop the "IND" strip text if the engine picked it up as a separate word
-  const words = (data.text || '').trim().split(/\s+/).filter(w => w && w !== 'IND');
-  return { engine: 'browser: tesseract.js', raw_text: words.join(' '), confidence: (data.confidence || 0) / 100 };
+  const detections = (data.words || []).map(w => ({
+    text: w.text, confidence: (w.confidence || 0) / 100, box: [w.bbox.x0, w.bbox.y0, w.bbox.x1, w.bbox.y1],
+  }));
+  const selected = selectPlateText(detections);
+  const img = document.getElementById('ocr-preview-img');
+  return {
+    engine: 'browser: tesseract.js', raw_text: selected.text, confidence: selected.confidence,
+    box: selected.box, imageSize: img ? [img.naturalWidth, img.naturalHeight] : null,
+    alternatives: selected.alternatives, detections: detections.length,
+  };
+}
+
+/* ---- Plate selection: JS port of select_plate_text() in matching/ocr.py ---- */
+const INDIAN_PLATE_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$/;
+const BH_SERIES_RE = /^\d{2}BH\d{4}[A-Z]{1,2}$/;
+
+function plateScore(text, height, maxHeight, confidence) {
+  const norm = normalizePlate(text);
+  if (norm.length < 4 || norm.length > 11 || !/\d/.test(norm)) return null;
+  let score = height / maxHeight + 0.3 * confidence;
+  if (/[A-Z]/.test(norm)) score += 0.15;
+  score += 0.02 * norm.length;
+  if (INDIAN_PLATE_RE.test(norm) || BH_SERIES_RE.test(norm)) score += 0.35;
+  return score;
+}
+
+function joinRun(run) {
+  const parts = [run[0].text];
+  for (let i = 1; i < run.length; i++) {
+    const a = run[i - 1];
+    let textB = run[i].text;
+    const overlap = a.x1 - run[i].x0;
+    const normA = normalizePlate(a.text);
+    if (overlap > 0 && normA) {
+      const charWidth = (a.x1 - a.x0) / normA.length;
+      for (let k = Math.min(3, normA.length); k > 0; k--) {
+        const stripped = textB.replace(/^[\s.-]+/, '');
+        const head = normalizePlate(stripped.slice(0, k));
+        if (overlap >= 0.4 * k * charWidth && head.length === k && head === normA.slice(-k)) {
+          textB = stripped.slice(k);
+          break;
+        }
+      }
+    }
+    parts.push(textB.trim());
+  }
+  return parts.filter(Boolean).join(' ');
+}
+
+function selectPlateText(detections) {
+  const empty = { text: '', confidence: 0, box: null, alternatives: [] };
+  const items = detections
+    .filter(d => d.text && d.text.trim())
+    .filter(d => (d.text.match(/[a-z]/g) || []).length <= (d.text.match(/[A-Z]/g) || []).length)
+    .map(d => ({
+      text: d.text.trim(), confidence: d.confidence, box: d.box, x0: d.box[0], x1: d.box[2],
+      height: Math.max(1, d.box[3] - d.box[1]), cy: (d.box[1] + d.box[3]) / 2,
+    }));
+  if (!items.length) return empty;
+  const maxHeight = Math.max(...items.map(i => i.height));
+
+  // Group detections into rows: similar vertical centre and similar height
+  const rows = [];
+  [...items].sort((a, b) => b.height - a.height).forEach(d => {
+    const row = rows.find(r => Math.abs(d.cy - r[0].cy) < 0.4 * r[0].height
+      && d.height / r[0].height >= 0.6 && d.height / r[0].height <= 1.67);
+    if (row) row.push(d); else rows.push([d]);
+  });
+
+  // Score every run of adjacent boxes in each row
+  const candidates = [];
+  rows.forEach(row => {
+    row.sort((a, b) => a.x0 - b.x0);
+    for (let start = 0; start < row.length; start++) {
+      for (let end = start + 1; end <= row.length; end++) {
+        const run = row.slice(start, end);
+        const last = run[run.length - 1];
+        const prev = run[run.length - 2];
+        if (prev && last.x0 - prev.x1 > 1.5 * prev.height) break;
+        const text = joinRun(run);
+        const height = run.reduce((sum, r) => sum + r.height, 0) / run.length;
+        const confidence = Math.min(...run.map(r => r.confidence));
+        const score = plateScore(text, height, maxHeight, confidence);
+        if (score === null) continue;
+        candidates.push({
+          text, normalized: normalizePlate(text), confidence, score,
+          box: [Math.min(...run.map(r => r.box[0])), Math.min(...run.map(r => r.box[1])),
+            Math.max(...run.map(r => r.box[2])), Math.max(...run.map(r => r.box[3]))],
+        });
+      }
+    }
+  });
+  if (!candidates.length) return empty;
+  candidates.sort((a, b) => (b.score - a.score) || (b.normalized.length - a.normalized.length));
+  const seen = new Set();
+  const unique = candidates.filter(c => {
+    if (seen.has(c.normalized)) return false;
+    seen.add(c.normalized);
+    return true;
+  });
+  const best = unique[0];
+  return {
+    text: best.text, confidence: best.confidence, box: best.box,
+    alternatives: unique.slice(1, 5).map(c => ({ text: c.text, normalized: c.normalized, score: c.score })),
+  };
+}
+
+function drawPlateBox(box, imageSize) {
+  const wrap = document.querySelector('.ocr-preview');
+  if (!wrap) return;
+  wrap.querySelectorAll('.ocr-box').forEach(el => el.remove());
+  if (!box || !imageSize || !imageSize[0]) return;
+  const [w, h] = imageSize;
+  const el = document.createElement('div');
+  el.className = 'ocr-box';
+  el.style.left = `${(box[0] / w) * 100}%`;
+  el.style.top = `${(box[1] / h) * 100}%`;
+  el.style.width = `${((box[2] - box[0]) / w) * 100}%`;
+  el.style.height = `${((box[3] - box[1]) / h) * 100}%`;
+  wrap.appendChild(el);
+}
+
+function useOcrAlternative(text) {
+  document.getElementById('plate-input').value = text;
+  updateNormalizedPreview();
+  if (lastOcr) lastOcr.raw_text = text;
+  runMatch();
 }
 
 // ---------------------------------------------------------------------------
