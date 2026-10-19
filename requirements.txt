@@ -4,3 +4,8 @@ plotly>=5.18
 pytest>=7.4
 flask>=3.0
 flask-cors>=4.0
+pillow>=10.1         # plate-image preprocessing & sample generation
+
+# Optional: server-side plate OCR (otherwise the web UI uses Tesseract.js in the browser)
+# pytesseract>=0.3   # also needs the Tesseract binary on PATH
+# easyocr>=1.7

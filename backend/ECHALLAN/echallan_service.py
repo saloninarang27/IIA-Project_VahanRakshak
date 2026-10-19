@@ -17,6 +17,33 @@ CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ministry_echallan.db")
 
+def _mediator_base_url():
+    """
+    Where to send cache-invalidation webhooks.
+    An explicit URL_MEDIATOR / HOST_MEDIATOR setting wins. Otherwise use the caller's
+    address: challan writes arrive proxied from the Mediator, so the caller IS the
+    Mediator - this also works when the Mediator runs on another machine.
+    """
+    port = os.environ.get("PORT_MEDIATOR", "5001")
+    if os.environ.get("URL_MEDIATOR"):
+        return os.environ["URL_MEDIATOR"].rstrip("/")
+    host = os.environ.get("HOST_MEDIATOR") or request.remote_addr or "127.0.0.1"
+    if ":" in host:  # IPv6 literal
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
+def _notify_mediator(vehicle_identifier, reason):
+    """Webhook ping so the Mediator invalidates its cached dossier for this vehicle."""
+    try:
+        req = urllib.request.Request(
+            f"{_mediator_base_url()}/api/v1/sync/invalidate",
+            data=json.dumps({"vehicle_identifier": vehicle_identifier, "reason": reason}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=1.0)
+    except Exception:
+        pass  # Mediator might be starting or offline; its cache TTL still bounds staleness
+
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
@@ -96,16 +123,7 @@ def issue_challan():
         conn.commit()
         last_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    # Webhook ping to Mediator to invalidate cache for this vehicle
-    try:
-        req = urllib.request.Request(
-            "http://127.0.0.1:5001/api/v1/sync/invalidate",
-            data=json.dumps({"vehicle_identifier": clean_id, "reason": "NEW_ECHALLAN_ISSUED"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req, timeout=1.0)
-    except Exception:
-        pass  # Mediator might be starting or offline
+    _notify_mediator(clean_id, "NEW_ECHALLAN_ISSUED")
 
     return jsonify({
         "message": "e-Challan issued successfully",
@@ -134,16 +152,7 @@ def update_challan_status(report_id):
         conn.execute("UPDATE ministry_report SET report_status = ? WHERE report_id = ?", (new_status, report_id))
         conn.commit()
 
-    # Invalidate cache for vehicle
-    try:
-        req = urllib.request.Request(
-            "http://127.0.0.1:5001/api/v1/sync/invalidate",
-            data=json.dumps({"vehicle_identifier": vehicle_id, "reason": "STATUS_CHANGED"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        urllib.request.urlopen(req, timeout=1.0)
-    except Exception:
-        pass
+    _notify_mediator(vehicle_id, "STATUS_CHANGED")
 
     return jsonify({"message": f"Challan {report_id} status updated to {new_status}", "report_id": report_id, "status": new_status})
 

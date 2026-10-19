@@ -64,14 +64,49 @@ const API = {
     return await res.json();
   },
 
-  async invalidateCache(plate) {
-    const res = await fetch(`${MEDIATOR_BASE_URL}/sync/invalidate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vehicle_identifier: plate })
-    });
-    return await res.json();
+  // ---- Approximate matching & data cleansing (/api/v1/matching) ----
+  async _matching(path, options = {}) {
+    const res = await fetch(`${MEDIATOR_BASE_URL}/matching${path}`, options);
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = { error: `HTTP ${res.status}` }; }
+    return { ok: res.ok, status: res.status, data };
   },
+
+  _json(method, body) {
+    return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) };
+  },
+
+  getMatchingConfig() { return this._matching('/config'); },
+
+  ocrPlateImage(file) {
+    const form = new FormData();
+    form.append('image', file);
+    return this._matching('/ocr', { method: 'POST', body: form });
+  },
+
+  searchPlate(payload) { return this._matching('/search', this._json('POST', payload)); },
+
+  getNoisyRecords(params = {}) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString();
+    return this._matching(`/noisy-records${q ? `?${q}` : ''}`);
+  },
+
+  getNoisyRecord(id, method) {
+    return this._matching(`/noisy-records/${id}${method ? `?method=${encodeURIComponent(method)}` : ''}`);
+  },
+
+  reviewNoisyRecord(id, payload) { return this._matching(`/noisy-records/${id}/review`, this._json('POST', payload)); },
+
+  runCleansing(payload) { return this._matching('/cleanse', this._json('POST', payload)); },
+
+  getAuditTrail(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this._matching(`/audit${q ? `?${q}` : ''}`);
+  },
+
+  getMatchingEvaluation() { return this._matching('/evaluation'); },
+
+  runMatchingEvaluation() { return this._matching('/evaluation/run', { method: 'POST' }); },
 
   async verifySqlAuth(credentials) {
     const res = await fetch(`${MEDIATOR_BASE_URL}/sql/auth`, {

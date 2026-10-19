@@ -1,0 +1,193 @@
+/* Approximate Vehicle Matching & Data Cleansing page */
+
+.viz-root {
+  --surface-1: #ffffff;
+  --grid-line: #e2e8f0;
+  --series-ocr: #2a78d6;       /* categorical slot 1 */
+  --series-hybrid: #eb6834;    /* slot 2 */
+  --series-lev: #1baf7a;       /* slot 3 */
+  --series-jw: #eda100;        /* slot 4 */
+}
+
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.75rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab-btn:hover { color: var(--text-primary); }
+.tab-btn.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.scan-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 400px) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .scan-grid { grid-template-columns: 1fr; }
+}
+
+.step-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 1.25rem 0 0.6rem;
+}
+.step-title:first-child { margin-top: 0; }
+
+.dropzone {
+  border: 2px dashed var(--border-medium);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  cursor: pointer;
+  background: var(--bg-muted);
+  transition: border-color 0.15s, background 0.15s;
+}
+.dropzone:hover, .dropzone.dragover { border-color: var(--accent-primary); background: #eff6ff; }
+.dropzone img { max-width: 100%; max-height: 120px; border-radius: 6px; display: block; margin: 0 auto 0.5rem; }
+
+.sample-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.sample-row .chip { font-size: 0.72rem; }
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.form-row .form-input, .form-row .form-select { padding: 0.5rem 0.7rem; font-size: 0.88rem; }
+.mini-label { display: block; font-size: 0.75rem; color: var(--text-muted); font-weight: 600; margin-bottom: 0.25rem; }
+
+.ocr-meta { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.4rem; min-height: 1.1em; }
+
+/* Plate rendering with character-level differences */
+.plate-text {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.plate-text .ch-ocr { background: var(--status-warning-bg); color: var(--status-warning-text); border-radius: 3px; padding: 0 1px; }
+.plate-text .ch-edit { background: var(--status-danger-bg); color: var(--status-danger-text); border-radius: 3px; padding: 0 1px; }
+.plate-text .ch-ins { background: var(--status-info-bg); color: var(--status-info-text); border-radius: 3px; padding: 0 1px; }
+.plate-big { font-size: 1.6rem; }
+
+.decision-card {
+  border: 1px solid var(--border-subtle);
+  border-left-width: 5px;
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.25rem;
+  background: var(--bg-surface);
+  margin-bottom: 1.25rem;
+}
+.decision-card.d-ACCEPT { border-left-color: var(--status-success); }
+.decision-card.d-CORRECT { border-left-color: var(--accent-primary); }
+.decision-card.d-REVIEW { border-left-color: var(--status-warning); }
+.decision-card.d-REJECT { border-left-color: var(--status-danger); }
+
+.plate-compare {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.85rem 0;
+}
+.plate-compare .plate-box { min-width: 0; }
+.plate-compare .arrow { font-size: 1.4rem; color: var(--text-muted); }
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem 1rem;
+  margin-top: 0.75rem;
+}
+.kv-grid .k { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.kv-grid .v { font-size: 0.92rem; color: var(--text-primary); font-weight: 600; }
+
+.reason-text { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5; }
+.flag-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+
+.score-cell { display: flex; align-items: center; gap: 0.45rem; min-width: 110px; }
+.score-bar { flex: 1; height: 6px; background: var(--bg-muted); border-radius: 3px; overflow: hidden; min-width: 40px; }
+.score-bar > span { display: block; height: 100%; background: var(--accent-primary); border-radius: 3px; }
+.score-num { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary); }
+
+.ctx-pill { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 4px; margin: 0.1rem 0.15rem 0.1rem 0; }
+.ctx-MATCH { background: var(--status-success-bg); color: var(--status-success-text); }
+.ctx-MISMATCH { background: var(--status-danger-bg); color: var(--status-danger-text); }
+.ctx-MISSING { background: var(--bg-muted); color: var(--text-muted); }
+
+.data-table td.mono, .data-table .mono { font-family: var(--font-mono); font-size: 0.82rem; }
+.data-table tr.clickable { cursor: pointer; }
+.data-table tr.clickable:hover td { background: #f8fafc; }
+.data-table tr.selected-method td { background: #eff6ff; }
+.data-table td.reason-col { max-width: 360px; font-size: 0.8rem; color: var(--text-secondary); }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.toolbar .group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.toolbar .form-select, .toolbar .form-input { width: auto; padding: 0.45rem 0.7rem; font-size: 0.85rem; }
+
+.section-title { font-size: 1.05rem; font-weight: 700; margin: 1.75rem 0 0.4rem; }
+.section-sub { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.9rem; line-height: 1.5; }
+
+.empty-note { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.9rem; }
+
+/* F1-vs-threshold chart */
+.chart-wrap { position: relative; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+.chart-legend .key { display: inline-flex; align-items: center; gap: 0.4rem; }
+.chart-legend .swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-svg .grid { stroke: var(--grid-line); stroke-width: 1; }
+.chart-svg .axis-label { fill: var(--text-muted); font-size: 11px; }
+.chart-svg .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-svg .best-dot { stroke: var(--surface-1); stroke-width: 2; }
+.chart-svg .best-label { fill: var(--text-primary); font-size: 11px; font-weight: 600; }
+.chart-svg .crosshair { stroke: var(--text-muted); stroke-width: 1; }
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevated);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  display: none;
+  min-width: 170px;
+  z-index: 5;
+}
+.chart-tooltip .row { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
+.chart-tooltip .row .name { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-secondary); }
+
+.modal-card.wide { max-width: 980px; max-height: 90vh; overflow-y: auto; }
+
+.spinner-inline {
+  display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-medium);
+  border-top-color: var(--accent-primary); border-radius: 50%; animation: mspin 0.8s linear infinite; vertical-align: -2px;
+}
+@keyframes mspin { to { transform: rotate(360deg); } }

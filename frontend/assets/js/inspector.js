@@ -114,7 +114,35 @@ async function inspectVehicle(plate, forceSync = false) {
   }
 }
 
+function renderApproximateMatches(matches, plate) {
+  const box = document.getElementById('inspector-approx-matches');
+  if (!box) return;
+  if (!matches || !matches.candidates || matches.candidates.length === 0) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+  const chips = matches.candidates.map(c => `
+    <a class="chip" href="/pages/inspector.html?plate=${encodeURIComponent(c.plate)}" style="text-decoration:none;" title="${c.make} ${c.model}, ${c.color} — vehicle #${c.vehicle_id}">
+      ${c.plate} <span style="color:var(--text-muted);">${c.plate_score.toFixed(3)}</span>
+    </a>`).join('');
+  const verdict = matches.corrected_plate
+    ? `Approximate matching would correct this reading to <strong>${matches.corrected_plate}</strong>.`
+    : `${matches.candidate_count} plausible registered vehicle(s) — ${matches.reason}`;
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="background:#eff6ff; border:1px solid #bfdbfe; padding:1rem 1.2rem; border-radius:var(--radius-md); margin-bottom:1.25rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <strong style="color:#1e40af; font-size:0.95rem;">🧩 ${plate} is not in the VAHAN registry — did you mean:</strong>
+        <a href="/pages/matching.html?plate=${encodeURIComponent(plate)}" class="btn btn-secondary btn-sm" style="text-decoration:none;">Open in Plate Matching</a>
+      </div>
+      <div style="font-size:0.83rem; color:#1e3a8a; margin:0.35rem 0 0.6rem;">${verdict}</div>
+      <div class="chips-row">${chips}</div>
+    </div>`;
+}
+
 function renderDossier(res, trace) {
+  renderApproximateMatches(res.data.approximate_matches, res.data.vehicle?.vehicle_identifier);
   const v = res.data.vehicle;
   const source = res.data.source;
   const latency = res.data.query_latency_ms || res.data.federation_latency_ms || res.clientLatencyMs;

@@ -81,6 +81,7 @@ DB_POLICE = os.path.join(BASE_DIR, "POLICE_CCTNS", "theft_scrap.db")
 DB_ANPR = os.path.join(BASE_DIR, "ANPR_CAMERA", "vehicle_capture.db")
 DB_ECHALLAN = os.path.join(BASE_DIR, "ECHALLAN", "ministry_echallan.db")
 DB_DWH = os.path.join(BASE_DIR, "dwh", "warehouse_dwh.db")
+DB_DATA_QUALITY = os.path.join(BASE_DIR, "dwh", "data_quality.db")  # noisy-record staging + correction audit trail
 
 # ---------------------------------------------------------------------------
 # Cache & Simulation Settings

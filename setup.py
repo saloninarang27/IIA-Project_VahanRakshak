@@ -43,6 +43,23 @@ def main():
     shutil.copy(c.DB_DWH, bc.DB_DWH)
     print("  [✓] Microservice databases synced.")
 
+    print("\n[6/6] Building data-quality store and evaluating plate-matching algorithms (~40s)...")
+    import os
+    from matching import store
+    from matching.evaluation import run_evaluation, evaluate_cleansing
+    for suffix in ("", "-wal", "-shm"):
+        if os.path.exists(bc.DB_DATA_QUALITY + suffix):
+            os.remove(bc.DB_DATA_QUALITY + suffix)
+    store.init_store(bc.DB_DATA_QUALITY)
+    index = store.load_reference_index_from_db(bc.DB_VAHAN)
+    staged = store.seed_noisy_records(bc.DB_DATA_QUALITY, index)
+    report = run_evaluation([v["plate"] for v in index])
+    report["cleansing"] = evaluate_cleansing(store.list_noisy_records(bc.DB_DATA_QUALITY), index)
+    store.save_evaluation(bc.DB_DATA_QUALITY, report)
+    best = report["methods"][report["selected_method"]]
+    print(f"  [✓] {staged} noisy records staged for cleansing.")
+    print(f"  [✓] Best method: {best['label']} (F1 {best['f1']:.3f} at threshold {best['best_threshold']:.2f}).")
+
     print("\nSetup complete. Next steps:")
     print("  python3 start_system.py # launch the distributed web app + microservices")
     print("  pytest                  # run the automated test suite")

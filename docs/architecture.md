@@ -11,7 +11,7 @@ graph TD
     subgraph MediatorCore ["Mediator & Cache-Aside Layer (Port 5001)"]
         Mediator["Central Mediator Application (backend/mediator_app.py)"]
         DWH[("Kimball Star Schema DWH & Cache<br>backend/dwh/warehouse_dwh.db")]
-        Sync["Cache Reconciliation Engine<br>(TTL, ETag, Invalidation Webhooks)"]
+        Sync["Cache Reconciliation Engine<br>(TTL, Invalidation Webhooks)"]
         Rules["Pure Business Rule Engine<br>(ministry/rules.py)"]
     end
 

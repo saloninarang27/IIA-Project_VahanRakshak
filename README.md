@@ -6,7 +6,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![Flask Microservices](https://img.shields.io/badge/architecture-Microservices%20Federation-orange.svg)](docs/architecture.md)
-[![Tests Passing](https://img.shields.io/badge/tests-49%2F49%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-80%2F80%20Passing-brightgreen.svg)](tests/)
 [![Validation](https://img.shields.io/badge/validation-18%2F18%20Checks%20Passed-success.svg)](scripts/validate_project.py)
 [![Evaluation Rubric](https://img.shields.io/badge/rubric%20score-15%2F15%20Marks-gold.svg)](#-project-a-evaluation-rubric-traceability-1515-marks)
 
@@ -48,8 +48,8 @@ All sources communicate through a central **Mediator (Global Schema Coordinator)
 | # | Rubric Criterion | Marks | VehicleSentinel Architectural Implementation | Source Reference |
 |---|---|:---:|---|---|
 | **1** | **Define the Scope of Work** | **1** | Multi-agency federation identifying uninsured/stolen vehicles on road without centralized data monopoly. Clear departmental boundaries, service contracts, and REST APIs. | [`README.md`](README.md), [`docs/architecture.md`](docs/architecture.md) |
-| **2** | **Innovative Aspects of Project** | **1** | **Cache-Aside Pattern on Kimball DWH** (`<2ms` cache hits) + **Stale Data Reconciliation** (300s TTL, `If-Modified-Since` headers, webhook cache invalidation) + **"⚡ Force Live Sync"** real-time API federation visualizer. | [`backend/mediator_app.py`](backend/mediator_app.py), [`docs/architecture.md`](docs/architecture.md) |
-| **3** | **Databases Schema Design** | **2** | **5 heterogeneous SQLite databases** with deliberately divergent primary linking keys (`plate_number`, `registration_no`, `vehicle_registration_id`, `vehicle_no`, `vehicle_identifier`) + **Conformed Kimball Star Schema** (`DIM_VEHICLE`, `FACT_VEHICLE_EVENT`, `DIM_DATE`, `DIM_LOCATION`, `DIM_STATUS`). | [`backend/*/schema.sql`](backend/), [`schemas/dwh_schema.sql`](schemas/dwh_schema.sql), [`docs/database_design.md`](docs/database_design.md) |
+| **2** | **Innovative Aspects of Project** | **1** | **Cache-Aside Pattern on Kimball DWH** (`<2ms` cache hits) + **Stale Data Reconciliation** (300s TTL expiry + webhook cache invalidation) + **"⚡ Force Live Sync"** real-time API federation visualizer. | [`backend/mediator_app.py`](backend/mediator_app.py), [`docs/architecture.md`](docs/architecture.md) |
+| **3** | **Databases Schema Design** | **2** | **5 heterogeneous SQLite databases** with deliberately divergent primary linking keys (`plate_number`, `registration_no`, `vehicle_registration_id`, `vehicle_no`, `vehicle_identifier`) + **Conformed Kimball Star Schema** (`DIM_VEHICLE`, `FACT_VEHICLE_EVENT`, `DIM_DATE`, `DIM_LOCATION`, `DIM_STATUS`). | [`schemas/*_schema.sql`](schemas/), [`schemas/dwh_schema.sql`](schemas/dwh_schema.sql), [`docs/database_design.md`](docs/database_design.md) |
 | **4** | **Populating Data in Tables** | **2** | **2,000 distinct vehicle records** and **10,000+ sighting events** seeded across all 5 databases. Comprehensive test scenarios covering: Clean (`DL01AB1001`), Expired (`DL01AB1002`), Uninsured (`DL01AB1003`), Stolen (`DL01AB1004`), Scrapped (`DL01AB1005`), and Multi-Policy (`DL01AB1010`). | [`seed/`](seed/), [`data/`](data/), [`scripts/validate_project.py`](scripts/validate_project.py) |
 | **5** | **Schema Matching / DWH Views / APIs** | **2** | **ALL THREE METHODS IMPLEMENTED**: <br>1. Dynamic **Levenshtein edit-distance string similarity** + Semantic Alias Dictionary (`backend/schema_matcher.py`) exposing `/api/v1/schema-matching`.<br>2. Materialized DWH Views (`mv_vehicle_complete_history`, `mv_uninsured_on_road`).<br>3. 5 isolated Microservice REST APIs (Ports 5002–5006). | [`backend/schema_matcher.py`](backend/schema_matcher.py), [`dwh/refresh_views.py`](dwh/refresh_views.py), [`backend/`](backend/) |
 | **6** | **Seamless SQL Decomposition & Federation** | **2** | Mediator decomposes high-level plate lookup into 5 concurrent sub-queries via `ThreadPoolExecutor`. High-speed server-side SQL pagination (`LIMIT ? OFFSET ?`) delivering sub-5ms analytics. | [`backend/mediator_app.py`](backend/mediator_app.py), [`mediator/query_decomposer.py`](mediator/query_decomposer.py), [`docs/federation.md`](docs/federation.md) |
@@ -97,12 +97,29 @@ All sources communicate through a central **Mediator (Global Schema Coordinator)
 
 ---
 
+## 🧩 Approximate Vehicle Matching & Data Cleansing
+
+Full write-up, results and requirement traceability: [`docs/approximate_matching.md`](docs/approximate_matching.md). UI: **🧩 Plate Matching** (`/pages/matching.html`).
+
+- **Scan & match:** upload a plate image (server OCR via pytesseract/easyocr if installed, otherwise Tesseract.js in the browser). The reading is normalised and scored against all 2,000 VAHAN plates with **Jaro–Winkler**, **Levenshtein**, an **OCR-weighted edit distance** (O/0, I/1, B/8 … cost 0.25) and a hybrid, and every plausible candidate is ranked with its scores.
+- **Algorithm choice by measurement:** on 290 labelled noisy queries, the OCR-weighted distance wins with **F1 0.877** (P 0.892 / R 0.863), against Levenshtein 0.704 and Jaro–Winkler 0.665. It resolves 100% of OCR glyph confusions, where Levenshtein manages 52% and 30%.
+- **Cleansing rules R1–R9:** make, model, colour and type decide **ACCEPT / CORRECT / REJECT / REVIEW**. Corrections need confirming context or a pure, unambiguous OCR-glyph swap; conflicting and ambiguous records are flagged. On 112 labelled records covering missing information, incorrect plates, conflicting details and multiple matches, the engine agrees with every label, and its 42 automatic corrections are all correct.
+- **Audit:** the original records and an append-only correction audit trail (vehicle ID, similarity, reason, status, reviewer) are protected by SQLite triggers. Reviewer decisions supersede rule-engine rows and are never overwritten.
+- **Integrated:** a Mediator blueprint (`/api/v1/matching/*`), a federated VAHAN registry-index endpoint, and "did you mean" suggestions in the Vehicle Inspector for unregistered plates.
+
+```bash
+python -m matching.evaluation      # print the algorithm comparison (≈30s)
+```
+
+---
+
 ## 🌐 Deployed Microservices Directory
 
 | Service Name | Port | Database File | Local Table | Linking Identifier |
 |:---|:---:|:---|:---|:---|
 | **Frontend Web App** | `3000` | Static HTML / CSS / JS | N/A | Dynamic Hostname (`window.location.hostname`) |
 | **Central Mediator** | `5001` | `backend/dwh/warehouse_dwh.db` | `mv_vehicle_complete_history` | `vehicle_identifier` |
+| **Mediator: Data Quality** | `5001` | `backend/dwh/data_quality.db` | `dq_noisy_records`, `dq_plate_corrections` | normalised plate → VAHAN `registration_id` |
 | **IIB Insurance Service** | `5002` | `backend/IIB/insurance_iib.db` | `policies` | `registration_no` |
 | **MoRTH VAHAN Registry** | `5003` | `backend/VAHAN/parivahan_vahan.db` | `vehicle_registrations` | `vehicle_registration_id` |
 | **Police CCTNS & RVSF** | `5004` | `backend/POLICE_CCTNS/theft_scrap.db` | `vehicle_status` | `vehicle_no` |
@@ -156,10 +173,10 @@ Test these pre-seeded vehicle plates directly in the Vehicle Search or Inspector
 
 ## 📊 Verification & Automated Test Suite
 
-VehicleSentinel includes a 100% passing automated test suite with **49 tests** directly validating the evaluation rubric:
+VehicleSentinel includes a 100% passing automated test suite with **80 tests**: 49 validating the evaluation rubric and 31 covering approximate matching & data cleansing ([`tests/test_matching.py`](tests/test_matching.py)):
 
 ```bash
-# Run the complete test suite (49/49 passing)
+# Run the complete test suite (80/80 passing)
 pytest -v
 
 # Run the strict 18-point data and schema integrity validation

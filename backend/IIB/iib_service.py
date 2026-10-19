@@ -52,12 +52,6 @@ def get_policies_for_vehicle(registration_no):
     
     from datetime import timezone
     last_mod = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
-    
-    # Conditional ETag / If-Modified-Since support
-    if_mod = request.headers.get("If-Modified-Since")
-    if if_mod and not request.args.get("force"):
-        # Simulated 304 when client asks if unchanged
-        pass # In real API check timestamp
 
     resp = make_response(jsonify({
         "agency": "IIB_IRDAI",

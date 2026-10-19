@@ -71,6 +71,25 @@ def get_vehicle_rc(vehicle_registration_id):
     resp.headers["Last-Modified"] = last_mod
     return resp
 
+@app.route("/api/v1/registry/index", methods=["GET"])
+def get_registry_index():
+    """Lightweight projection of every registered vehicle, used by the Mediator's approximate matcher."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT registration_id, vehicle_registration_id, vehicle_make, vehicle_model,
+                   color, vehicle_type, fuel_type, registration_status
+            FROM vehicle_registration
+            ORDER BY vehicle_registration_id
+            """
+        ).fetchall()
+    return jsonify({
+        "agency": "MoRTH_VAHAN",
+        "query_key": "vehicle_registration_id",
+        "count": len(rows),
+        "vehicles": [dict(r) for r in rows]
+    })
+
 @app.route("/api/v1/rc", methods=["POST"])
 def register_vehicle():
     data = request.get_json(force=True)

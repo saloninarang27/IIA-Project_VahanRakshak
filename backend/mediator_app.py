@@ -273,6 +273,23 @@ def upsert_cache(dossier):
         conn.commit()
 
 # ---------------------------------------------------------------------------
+# Approximate Vehicle Matching & Data Cleansing (backend/matching_api.py)
+# ---------------------------------------------------------------------------
+from backend import matching_api
+
+matching_api.configure(_fetch_service)
+app.register_blueprint(matching_api.matching_bp)
+
+def _attach_approximate_matches(vehicle):
+    """For a plate VAHAN does not know, suggest the registered vehicles it most likely is."""
+    if not vehicle or vehicle.get("registration_status") != "UNREGISTERED":
+        return None
+    try:
+        return matching_api.suggest_matches(vehicle["vehicle_identifier"])
+    except Exception as e:
+        return {"error": f"Approximate matching unavailable: {e}"}
+
+# ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
 @app.route("/api/v1/health", methods=["GET"])
@@ -356,6 +373,7 @@ def get_vehicle(plate_number):
                 "source": "CACHE_HIT",
                 "cache_status": "FRESH",
                 "vehicle": cached_dict,
+                "approximate_matches": _attach_approximate_matches(cached_dict),
                 "query_latency_ms": 1.2
             }))
             resp.headers["X-Cache"] = "HIT"
@@ -431,6 +449,7 @@ def get_vehicle(plate_number):
         "failed_count": failed_count,
         "target_host": target_host,
         "vehicle": dossier,
+        "approximate_matches": _attach_approximate_matches(dossier),
         "federation_latency_ms": elapsed_ms,
         "decomposed_calls": {
             k: {"service": v["service"], "latency_ms": v["latency_ms"], "status": v["status"], "error": v.get("error")}
@@ -863,6 +882,8 @@ def sql_execute():
                         local_conn.commit()
                 except Exception as ex:
                     print(f"[!] Direct DB update note: {ex}")
+            if target == "vahan":
+                matching_api.invalidate_index()  # registry changed -> rebuild the matcher's reference index
 
         return jsonify({
             "status": res_data.get("status", "success"),
