@@ -230,6 +230,7 @@ async function handleImage(file) {
   const url = URL.createObjectURL(file);
   content.innerHTML = `<div class="ocr-preview"><img src="${url}" alt="Uploaded plate" id="ocr-preview-img"></div><span style="font-size:0.78rem;">${esc(file.name)} — click to replace</span>`;
   meta.innerHTML = '<span class="spinner-inline"></span> Running OCR on the server…';
+  clearScanResult('Reading the plate…');
 
   let result = null;
   try {
@@ -269,9 +270,15 @@ async function handleImage(file) {
   }
   if (!normalizePlate(result.raw_text)) {
     meta.insertAdjacentHTML('beforeend', ' — <span style="color:var(--status-danger);">no plate-like text found; type the plate manually below</span>');
+    clearScanResult('No plate could be read from this image. Type the registration number in step 2.');
     return;
   }
   runMatch();
+}
+
+// Never leave the previous plate's decision on screen next to a new image
+function clearScanResult(message) {
+  document.getElementById('scan-result').innerHTML = `<div class="empty-note">${esc(message)}</div>`;
 }
 
 function loadScript(src) {
@@ -352,8 +359,13 @@ function joinRun(run) {
 function selectPlateText(detections) {
   const empty = { text: '', confidence: 0, box: null, alternatives: [] };
   const items = detections
-    .filter(d => d.text && d.text.trim())
-    .filter(d => (d.text.match(/[a-z]/g) || []).length <= (d.text.match(/[A-Z]/g) || []).length)
+    // drop border strokes ("|") and real words (watermarks, brand names); short tokens such
+    // as "lA" are kept because OCR often reads plate fragments in lower case
+    .filter(d => normalizePlate(d.text))
+    .filter(d => {
+      const letters = d.text.match(/[A-Za-z]/g) || [];
+      return letters.length < 4 || (d.text.match(/[a-z]/g) || []).length <= letters.length / 2;
+    })
     .map(d => ({
       text: d.text.trim(), confidence: d.confidence, box: d.box, x0: d.box[0], x1: d.box[2],
       height: Math.max(1, d.box[3] - d.box[1]), cy: (d.box[1] + d.box[3]) / 2,
@@ -381,7 +393,8 @@ function selectPlateText(detections) {
         if (prev && last.x0 - prev.x1 > 1.5 * prev.height) break;
         const text = joinRun(run);
         const height = run.reduce((sum, r) => sum + r.height, 0) / run.length;
-        const confidence = Math.min(...run.map(r => r.confidence));
+        const weights = run.map(r => Math.max(1, normalizePlate(r.text).length));
+        const confidence = run.reduce((sum, r, i) => sum + r.confidence * weights[i], 0) / weights.reduce((a, b) => a + b, 0);
         const score = plateScore(text, height, maxHeight, confidence);
         if (score === null) continue;
         candidates.push({

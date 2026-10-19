@@ -62,6 +62,17 @@ def free_ports():
     if killed_any:
         time.sleep(0.5)
 
+def ports_in_use():
+    """Ports from SERVICES that already accept connections on this machine."""
+    import socket
+    busy = []
+    for _, _, port in SERVICES:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                busy.append(port)
+    return busy
+
 def cleanup(sig=None, frame=None):
     print("\n[!] Shutting down all VahanRakshak services...")
     for name, proc in processes:
@@ -93,6 +104,17 @@ def main():
 
     # Pre-flight check: ensure ports are free
     free_ports()
+    busy = ports_in_use()
+    if busy:
+        # On Windows a second Flask server can bind the same port and requests keep going to the OLD
+        # instance, so a duplicate start would silently keep serving stale code. Refuse instead.
+        print("\n[!] These ports are already in use - an earlier VahanRakshak instance is probably still running:")
+        for port in busy:
+            print(f"      port {port}")
+        print("    Stop it first (Ctrl+C in its terminal, or close that terminal), then run start_system.py again.")
+        if os.name == "nt":
+            print("    To find it:  netstat -ano | findstr :5001   then   taskkill /PID <pid> /T /F")
+        sys.exit(1)
 
     for name, cmd, port in SERVICES:
         env = os.environ.copy()

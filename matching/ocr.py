@@ -47,10 +47,15 @@ def _normalize(text):
     return re.sub(r"[^A-Z0-9]", "", (text or "").upper())
 
 
-def _mostly_lowercase(text):
-    lower = sum(1 for c in text if c.islower())
-    upper = sum(1 for c in text if c.isupper())
-    return lower > upper
+def _is_word_not_plate(text):
+    """
+    Watermarks, brand names and URLs are mostly lower case. Short tokens are exempt:
+    OCR often reads plate fragments such as "1A" as "lA" or "1a".
+    """
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 4:
+        return False
+    return sum(1 for c in letters if c.islower()) > len(letters) / 2
 
 
 def _rows(detections):
@@ -91,6 +96,12 @@ def _join_run(run):
     return " ".join(p for p in parts if p)
 
 
+def _run_confidence(run):
+    """Character-weighted mean, so one shaky piece does not sink an otherwise good plate."""
+    weights = [max(1, len(_normalize(r["text"]))) for r in run]
+    return sum(r["confidence"] * w for r, w in zip(run, weights)) / sum(weights)
+
+
 def _plate_score(text, height, max_height, confidence):
     norm = _normalize(text)
     if not (MIN_PLATE_CHARS <= len(norm) <= MAX_PLATE_CHARS) or not any(c.isdigit() for c in norm):
@@ -114,8 +125,8 @@ def select_plate_text(detections):
     items = []
     for d in detections:
         text = (d.get("text") or "").strip()
-        if not text or _mostly_lowercase(text):
-            continue                              # watermarks, brand names, URLs
+        if not _normalize(text) or _is_word_not_plate(text):
+            continue                              # border strokes ("|"), watermarks, brand names
         x0, y0, x1, y1 = d["box"]
         items.append({"text": text, "confidence": float(d.get("confidence") or 0.0),
                       "x0": x0, "x1": x1, "height": max(1.0, y1 - y0), "cy": (y0 + y1) / 2, "box": d["box"]})
@@ -133,7 +144,7 @@ def select_plate_text(detections):
                     break
                 text = _join_run(run)
                 height = sum(r["height"] for r in run) / len(run)
-                confidence = min(r["confidence"] for r in run)
+                confidence = _run_confidence(run)
                 score = _plate_score(text, height, max_height, confidence)
                 if score is None:
                     continue

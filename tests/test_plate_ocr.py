@@ -66,6 +66,16 @@ def test_prefers_whole_row_over_fragments():
     assert {"01AB1001", "AB1001"} & {a["normalized"] for a in selected["alternatives"]}
 
 
+@pytest.mark.parametrize("middle, expected", [("1a", "DL1AB2345"), ("lA", "DLLAB2345")])
+def test_tesseract_style_tokens_keep_whole_plate(middle, expected):
+    """Browser Tesseract read 'DL 1A B2345' as DL / 1a-or-lA / B2345 plus the border as '|'."""
+    detections = _dets([("DL", 0.88, [245, 290, 520, 470]), (middle, 0.55, [560, 292, 730, 468]),
+                        ("B2345", 0.93, [760, 288, 1310, 472]), ("|", 0.40, [1330, 280, 1350, 480])])
+    selected = select_plate_text(detections)
+    assert ocr._normalize(selected["text"]) == expected     # "lA" -> "LA" is fixed later by OCR-aware matching
+    assert "|" not in selected["text"]
+
+
 def test_overlapping_boxes_do_not_duplicate_characters():
     detections = _dets([("MH", 0.99, [94, 45, 234, 122]), ("12", 1.0, [218, 43, 369, 123]),
                         ("2 XY 4821", 0.94, [322, 41, 688, 128])])
