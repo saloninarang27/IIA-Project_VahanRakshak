@@ -35,12 +35,15 @@ def main():
     import shutil
     import config as c
     import backend.config as bc
-    shutil.copy(c.DB_INSURANCE, bc.DB_IIB)
-    shutil.copy(c.DB_REGISTRATION, bc.DB_VAHAN)
-    shutil.copy(c.DB_THEFT_SCRAP, bc.DB_POLICE)
-    shutil.copy(c.DB_CAPTURE, bc.DB_ANPR)
-    shutil.copy(c.DB_MINISTRY, bc.DB_ECHALLAN)
-    shutil.copy(c.DB_DWH, bc.DB_DWH)
+    import os
+    for src, dst in ((c.DB_INSURANCE, bc.DB_IIB), (c.DB_REGISTRATION, bc.DB_VAHAN), (c.DB_THEFT_SCRAP, bc.DB_POLICE),
+                     (c.DB_CAPTURE, bc.DB_ANPR), (c.DB_MINISTRY, bc.DB_ECHALLAN), (c.DB_DWH, bc.DB_DWH)):
+        # Remove the old database's WAL / shared-memory side files first: SQLite would otherwise
+        # replay the previous run's pending writes onto the fresh copy and corrupt it.
+        for suffix in ("-wal", "-shm"):
+            if os.path.exists(dst + suffix):
+                os.remove(dst + suffix)
+        shutil.copy(src, dst)
     print("  [✓] Microservice databases synced.")
 
     print("\n[6/6] Building data-quality store and evaluating plate-matching algorithms (~40s)...")
