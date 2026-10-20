@@ -61,6 +61,16 @@ def test_plate_missing_from_vahan_is_still_matchable_with_camera_attributes():
     assert a["candidates"][0]["sources"] == ["IIB", "ANPR"]
 
 
+def test_noisy_value_stored_by_another_agency_is_still_corrected():
+    """A camera stored the misread 'DL01AB1O01'; scanning that reading must not 'accept' the noise."""
+    rows = _synthetic_rows()
+    rows["ANPR"]["rows"].append({"plate": "DL01AB1O01", "sightings": 1})
+    index = build_reference_index(rows)
+    a = assess_record({"plate": "DL01AB1O01"}, index)
+    assert a["decision"] == "CORRECT" and a["corrected_plate"] == "DL01AB1001"
+    assert "NOT_IN_VAHAN" in a["flags"]
+
+
 def test_api_reports_all_five_sources():
     matching_api.invalidate_index()
     client = mediator_app.test_client()

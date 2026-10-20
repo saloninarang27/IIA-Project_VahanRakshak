@@ -10,17 +10,18 @@ the same real-world vehicle:
     theft_scrap.db            -> vehicle_no
     ministry.db                -> vehicle_identifier
 
-This module is the single place that knows that mapping, and normalizes a
+The mapping itself lives in matching/sources.py (one map shared by the web system
+and this in-process layer); this module exposes it and normalizes a
 raw plate string (whitespace, case, hyphens) into the canonical form used
 to query every source consistently.
 """
 
+from matching.sources import SOURCES
+
+# Derived from the single source map in matching/sources.py
 SOURCE_COLUMN_MAP = {
-    "capture": {"db_key": "capture", "table": "vehicle_capture", "id_column": "plate_number"},
-    "insurance": {"db_key": "insurance", "table": "insurance_policy", "id_column": "registration_no"},
-    "registration": {"db_key": "registration", "table": "vehicle_registration", "id_column": "vehicle_registration_id"},
-    "theft_scrap": {"db_key": "theft_scrap", "table": "theft_scrap_record", "id_column": "vehicle_no"},
-    "ministry": {"db_key": "ministry", "table": "ministry_report", "id_column": "vehicle_identifier"},
+    s["legacy_key"]: {"db_key": s["legacy_key"], "table": s["table"], "id_column": s["id_column"]}
+    for s in SOURCES
 }
 
 

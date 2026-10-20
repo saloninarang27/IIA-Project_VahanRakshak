@@ -18,6 +18,13 @@ Endpoints:
     GET  /audit                        append-only correction audit trail
     GET  /evaluation                   latest algorithm comparison (P / R / F1)
     POST /evaluation/run               re-run the comparison
+    POST /index/refresh                rebuild the five-database plate list now
+
+  Cleansing of the live agency databases (matching/agency_cleansing.py):
+    GET  /agency/scan                  find noisy identifiers in all five agency tables + proposed fix
+    POST /agency/cleanse               apply: UPDATE corrected rows in the agency DBs, flag the rest
+    POST /agency/review                reviewer decision for one flagged agency row (may UPDATE it)
+    GET  /agency/changes               append-only log of agency-data decisions (original values kept)
 """
 import os
 import threading
@@ -27,7 +34,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 import backend.config as config
-from matching import store
+from matching import store, agency_cleansing
 from matching.sources import fetch_source_rows, build_reference_index, source_summary
 from matching.cleansing import assess_record, RULES, CORRECTION_THRESHOLD, OCR_ONLY_CORRECTION_THRESHOLD, AMBIGUITY_MARGIN
 from matching.context import CONTEXT_ATTRIBUTES
@@ -39,6 +46,8 @@ from matching.ocr import extract_plate_text, available_engines, OCRUnavailable
 matching_bp = Blueprint("matching", __name__, url_prefix="/api/v1/matching")
 
 _fetch = None
+_on_vehicles_changed = None
+_sql_runner = agency_cleansing.http_sql_runner   # replaced in tests
 _index_lock = threading.Lock()
 _index_cache = {"vehicles": None, "by_plate": {}, "loaded_at": 0.0, "source": None, "loaded_at_iso": None}
 _store_ready = {"path": None}
@@ -49,10 +58,14 @@ class IndexUnavailable(RuntimeError):
     pass
 
 
-def configure(fetch_service):
-    """Inject the Mediator's federated HTTP fetcher (avoids a circular import)."""
-    global _fetch
+def configure(fetch_service, on_vehicles_changed=None):
+    """
+    Inject the Mediator's federated HTTP fetcher and its dossier-cache invalidation
+    (avoids a circular import).
+    """
+    global _fetch, _on_vehicles_changed
     _fetch = fetch_service
+    _on_vehicles_changed = on_vehicles_changed
 
 
 def invalidate_index():
@@ -62,7 +75,7 @@ def invalidate_index():
 
 def get_reference_index(force=False):
     with _index_lock:
-        fresh = time.time() - _index_cache["loaded_at"] < config.CACHE_TTL_SECONDS
+        fresh = time.time() - _index_cache["loaded_at"] < config.MATCHING_INDEX_TTL_SECONDS
         if _index_cache["vehicles"] is not None and fresh and not force:
             return _index_cache["vehicles"]
 
@@ -83,6 +96,21 @@ def get_reference_index(force=False):
             "sources": sources,
         })
         return vehicles
+
+
+def _vahan_index():
+    """Registered vehicles only: the reference for cleansing agency data."""
+    return [v for v in get_reference_index() if v.get("in_vahan")]
+
+
+def _store_conn():
+    return store.connect(_db())
+
+
+def _data_changed(plates):
+    invalidate_index()
+    if _on_vehicles_changed and plates:
+        _on_vehicles_changed(plates)
 
 
 def _index_meta():
@@ -321,3 +349,89 @@ def evaluation_run():
         return jsonify(_run_and_store_evaluation())
     finally:
         _evaluation_lock.release()
+
+
+@matching_bp.route("/index/refresh", methods=["POST"])
+def index_refresh():
+    get_reference_index(force=True)
+    return jsonify({"status": "success", "index": _index_meta()})
+
+
+# ---------------------------------------------------------------------------
+# Cleansing the live agency databases
+# ---------------------------------------------------------------------------
+def _annotate(anomalies):
+    """Attach each row's latest logged decision; reviewer-resolved rows are marked resolved."""
+    for a in anomalies:
+        latest = agency_cleansing.latest_decision(_store_conn, a["source"], a["row_id"], a["original_value"])
+        a["latest"] = ({k: latest[k] for k in ("change_id", "decision_status", "decided_by", "created_at", "reason")}
+                       if latest else None)
+        a["resolved"] = bool(latest and latest["decided_by"] != "RULE_ENGINE")
+    return anomalies
+
+
+def _scan_summary(anomalies):
+    by_action = {}
+    for a in anomalies:
+        if not a["resolved"]:
+            by_action[a["action"]] = by_action.get(a["action"], 0) + 1
+    return {"anomalies": len(anomalies), "open": sum(1 for a in anomalies if not a["resolved"]),
+            "resolved_by_reviewer": sum(1 for a in anomalies if a["resolved"]), "by_action": by_action}
+
+
+@matching_bp.route("/agency/scan", methods=["GET"])
+def agency_scan():
+    started = time.time()
+    method = _method_arg(request.args.get("method"))
+    result = agency_cleansing.scan(_vahan_index(), _sql_runner, method)
+    anomalies = _annotate(result["anomalies"])
+    return jsonify({"anomalies": anomalies, "sources": result["sources"], "summary": _scan_summary(anomalies),
+                    "registered_vehicles": len(_vahan_index()), "method": method,
+                    "duration_ms": round((time.time() - started) * 1000, 1)})
+
+
+@matching_bp.route("/agency/cleanse", methods=["POST"])
+def agency_cleanse():
+    body = request.get_json(force=True, silent=True) or {}
+    method = _method_arg(body.get("method"))
+    started = time.time()
+    result = agency_cleansing.scan(_vahan_index(), _sql_runner, method)
+    applied = agency_cleansing.apply(result["anomalies"], _store_conn, _sql_runner)
+    touched = applied["changed_plates"] + [a["original_value"] for a in result["anomalies"] if a["action"] == "UPDATE"]
+    _data_changed(touched)
+    return jsonify({"status": "success", "method": method, **applied,
+                    "scanned_sources": result["sources"],
+                    "duration_ms": round((time.time() - started) * 1000, 1)})
+
+
+@matching_bp.route("/agency/review", methods=["POST"])
+def agency_review():
+    body = request.get_json(force=True, silent=True) or {}
+    action = (body.get("action") or "").upper()
+    reviewer = (body.get("reviewer") or "").strip()
+    if not reviewer:
+        raise ValueError("reviewer is required for the audit trail")
+    if body.get("row_id") is None:
+        raise ValueError("row_id is required")
+    matched = None
+    if action == "CORRECT":
+        plate = normalize_plate(body.get("corrected_plate"))
+        matched = next((v for v in _vahan_index() if v["plate"] == plate), None)
+        if not matched:
+            raise ValueError(f"corrected_plate '{plate}' is not a registered (VAHAN) vehicle")
+    try:
+        result = agency_cleansing.review(_store_conn, (body.get("source") or "").upper(), int(body["row_id"]),
+                                         body.get("original_value"), action, reviewer[:60], body.get("note"),
+                                         matched_vehicle=matched, sql_runner=_sql_runner)
+    except LookupError as e:
+        return jsonify({"status": "error", "error": str(e)}), 409
+    if result["applied"]:
+        _data_changed([result["new_value"], body.get("original_value")])
+    return jsonify({"status": "success", **result})
+
+
+@matching_bp.route("/agency/changes", methods=["GET"])
+def agency_changes():
+    limit = max(1, min(request.args.get("limit", 50, type=int), 500))
+    offset = max(0, request.args.get("offset", 0, type=int))
+    return jsonify(agency_cleansing.list_changes(_store_conn, limit=limit, offset=offset))

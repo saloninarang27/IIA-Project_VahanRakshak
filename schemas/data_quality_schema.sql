@@ -2,7 +2,8 @@
 -- DATA QUALITY STORE (data_quality.db) - owned by the Central Mediator
 -- Staging area for noisy registration records arriving from agency feeds, plus
 -- an append-only audit trail of every matching / correction decision.
--- Source agency databases are never modified by the cleansing process.
+-- Staged records are never modified. Corrections written back to the five agency
+-- databases are logged in dq_agency_corrections (original value preserved).
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS dq_noisy_records (
@@ -103,3 +104,58 @@ CREATE TABLE IF NOT EXISTS dq_evaluation_runs (
     selected_method       TEXT,
     report_json           TEXT NOT NULL
 );
+
+-- ============================================================================
+-- Cleansing of the five AGENCY databases (live recorded data).
+-- Every change written back to an agency table is logged here first-hand: which
+-- row, which column, the original value and the new one. Append-only, so the
+-- original value of every corrected record is preserved.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS dq_agency_corrections (
+    change_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_system         TEXT NOT NULL,      -- VAHAN / IIB / POLICE / ANPR / ECHALLAN
+    table_name            TEXT NOT NULL,
+    row_id                INTEGER NOT NULL,   -- primary key of the row in that agency table
+    column_name           TEXT NOT NULL,      -- the agency's own identifier column
+    original_value        TEXT,               -- value found in the agency database (preserved)
+    new_value             TEXT,               -- value written back (NULL if nothing was written)
+    applied               INTEGER NOT NULL DEFAULT 0,  -- 1 = UPDATE executed on the agency database
+    matched_vehicle_id    INTEGER,
+    matched_plate         TEXT,
+    suggested_plate       TEXT,
+    similarity_score      REAL,
+    context_score         REAL,
+    context_from          TEXT,               -- where the make/model/colour evidence came from
+    decision              TEXT NOT NULL,      -- ACCEPT / CORRECT / REJECT / REVIEW
+    decision_status       TEXT NOT NULL,      -- STANDARDIZED / CORRECTED / PENDING_REVIEW / FLAGGED_REJECTED /
+                                              -- REVIEWED_CORRECTED / REVIEWED_ACCEPTED / REVIEWED_REJECTED
+    rule                  TEXT,
+    reason_code           TEXT,
+    reason                TEXT,
+    flags                 TEXT,               -- JSON array
+    decided_by            TEXT NOT NULL,      -- RULE_ENGINE or reviewer id
+    supersedes_change_id  INTEGER REFERENCES dq_agency_corrections(change_id),
+    created_at            TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dq_agency_row ON dq_agency_corrections (source_system, row_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_dq_agency_no_update
+BEFORE UPDATE ON dq_agency_corrections
+BEGIN
+    SELECT RAISE(ABORT, 'dq_agency_corrections is an append-only audit trail');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_dq_agency_no_delete
+BEFORE DELETE ON dq_agency_corrections
+BEGIN
+    SELECT RAISE(ABORT, 'dq_agency_corrections is an append-only audit trail');
+END;
+
+-- Latest decision per agency row and original value
+CREATE VIEW IF NOT EXISTS v_dq_agency_latest AS
+SELECT c.*
+FROM dq_agency_corrections c
+WHERE c.change_id = (SELECT MAX(c2.change_id) FROM dq_agency_corrections c2
+                     WHERE c2.source_system = c.source_system AND c2.row_id = c.row_id
+                       AND c2.original_value IS c.original_value);

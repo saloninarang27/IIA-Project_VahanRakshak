@@ -178,7 +178,16 @@ def assess_record(record: dict, index, method: str = DEFAULT_METHOD,
                     else "; no contextual attributes to cross-check")
         sources = exact.get("sources")
         if sources and "VAHAN" not in sources:
-            # The reading is a real plate known to other agencies, but it has no registration record
+            # The reading only exists in non-registry data. That value may itself be noise (e.g. an OCR
+            # misread stored by a camera), so first check whether it is a correctable misread of a
+            # REGISTERED vehicle under the normal rules; only otherwise accept it as an unregistered plate.
+            registered = [v for v in index if v.get("in_vahan", True) and v["plate"] != exact["plate"]]
+            alt = assess_record(record, registered, method, threshold=threshold, max_candidates=max_candidates)
+            if alt["decision"] == "CORRECT":
+                alt["flags"] = list(alt["flags"]) + ["NOT_IN_VAHAN"]
+                alt["reason"] = (f"'{normalized}' appears only in {', '.join(sources)} records, never in VAHAN. "
+                                 + alt["reason"])
+                return alt
             result["flags"].append("NOT_IN_VAHAN")
             return decide("ACCEPT", "R4", "EXACT_MATCH",
                           f"{normalized} exists in {', '.join(sources)} but is NOT registered in VAHAN{evidence}.",

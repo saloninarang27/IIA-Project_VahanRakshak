@@ -46,7 +46,9 @@ graph TD
    - **⚡ Force Live Sync**: Bypasses cache on demand for real-time demonstration.
 4. **Rule Engine** (`ministry/rules.py`) — Pure functions computing insurance validity, suspicion flags, risk level (LOW, MEDIUM, HIGH, CRITICAL), and statutory violation triggers.
 5. **Analytical Warehouse Layer** (`backend/dwh/warehouse_dwh.db`) — Star schema (`FACT_VEHICLE_EVENT`, `DIM_VEHICLE`, `DIM_LOCATION`, `DIM_DATE`, `DIM_STATUS`) with materialized views (`mv_vehicle_complete_history`) supporting server-side SQL pagination (`LIMIT ? OFFSET ?`).
-6. **Presentation Layer** (`frontend/server.py`, Port 3000) — Standalone Flask web server rendering a crisp, professional Light Theme dashboard accessible from any device on the local network (`http://192.168.52.85:3000`).
+6. **Approximate Matching & Data Cleansing Layer** (`matching/`, `backend/matching_api.py`, served by the Mediator under `/api/v1/matching/*`) — OCR of plate images, plate similarity (Jaro–Winkler, Levenshtein, OCR-weighted edit distance) against plates federated from all five agencies, rules R1–R9 that use make/model/colour/type as evidence, and write-back of corrections into the agency databases through each agency's own service, with an append-only change log. The five databases are described once, in `matching/sources.py`. Details: [`approximate_matching.md`](approximate_matching.md).
+7. **SQL REPL** (`POST /api/v1/sql/execute`) — Forwards SQL to the chosen agency service, which is the only writer of its database; after a write the matcher's plate list is rebuilt.
+8. **Presentation Layer** (`frontend/server.py`, Port 3000) — Standalone Flask web server rendering a crisp, professional Light Theme dashboard accessible from any device on the local network (`http://192.168.52.85:3000`).
 
 ## 3. Real-World Digital Infrastructure Mapping
 

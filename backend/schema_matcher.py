@@ -90,20 +90,15 @@ _SCHEMA_MAP_CACHE = None
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     """
-    Classic dynamic programming Levenshtein edit distance.
-    Evaluates minimum single-character edits (insertions, deletions, substitutions).
+    Levenshtein edit distance between two column names (case, '_' and '-' ignored):
+    minimum single-character insertions, deletions and substitutions. Uses the same
+    implementation as plate matching (matching/similarity.py).
     """
+    from matching.similarity import levenshtein_distance as _levenshtein
+
     a = s1.lower().replace('_', '').replace('-', '')
     b = s2.lower().replace('_', '').replace('-', '')
-    m, n = len(a), len(b)
-    dp = list(range(n + 1))
-    for i in range(1, m + 1):
-        prev = dp[:]
-        dp[0] = i
-        for j in range(1, n + 1):
-            cost = 0 if a[i - 1] == b[j - 1] else 1
-            dp[j] = min(dp[j] + 1, dp[j - 1] + 1, prev[j - 1] + cost)
-    return dp[n]
+    return _levenshtein(a, b)
 
 
 def similarity_score(col1: str, col2: str) -> float:

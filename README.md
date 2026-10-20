@@ -6,7 +6,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![Flask Microservices](https://img.shields.io/badge/architecture-Microservices%20Federation-orange.svg)](docs/architecture.md)
-[![Tests Passing](https://img.shields.io/badge/tests-80%2F80%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-116%2F116%20Passing-brightgreen.svg)](tests/)
 [![Validation](https://img.shields.io/badge/validation-18%2F18%20Checks%20Passed-success.svg)](scripts/validate_project.py)
 [![Evaluation Rubric](https://img.shields.io/badge/rubric%20score-15%2F15%20Marks-gold.svg)](#-project-a-evaluation-rubric-traceability-1515-marks)
 
@@ -101,11 +101,13 @@ All sources communicate through a central **Mediator (Global Schema Coordinator)
 
 Full write-up, results and requirement traceability: [`docs/approximate_matching.md`](docs/approximate_matching.md). UI: **🧩 Plate Matching** (`/pages/matching.html`).
 
-- **Scan & match:** upload a plate photo. OCR detects every text region (RapidOCR on the server if installed, otherwise Tesseract.js in the browser), then picks the plate: the tallest uppercase row with digits, ignoring badges, state names and watermarks. The reading is normalised and scored against all 2,000 VAHAN plates with **Jaro–Winkler**, **Levenshtein**, an **OCR-weighted edit distance** (O/0, I/1, B/8 … cost 0.25) and a hybrid, and every plausible candidate is ranked with its scores.
+- **Scan & match:** upload a plate photo. OCR detects every text region (RapidOCR on the server if installed, otherwise Tesseract.js in the browser), then picks the plate: the tallest uppercase row with digits, ignoring badges, state names and watermarks. The reading is normalised and scored against the plates held by all five agency databases (VAHAN, IIB, Police, ANPR, e-Challan; "Found in" per candidate) with **Jaro–Winkler**, **Levenshtein**, an **OCR-weighted edit distance** (O/0, I/1, B/8 … cost 0.25) and a hybrid, and every plausible candidate is ranked with its scores.
 - **Algorithm choice by measurement:** on 290 labelled noisy queries, the OCR-weighted distance wins with **F1 0.877** (P 0.892 / R 0.863), against Levenshtein 0.704 and Jaro–Winkler 0.665. It resolves 100% of OCR glyph confusions, where Levenshtein manages 52% and 30%.
 - **Cleansing rules R1–R9:** make, model, colour and type decide **ACCEPT / CORRECT / REJECT / REVIEW**. Corrections need confirming context or a pure, unambiguous OCR-glyph swap; conflicting and ambiguous records are flagged. On 112 labelled records covering missing information, incorrect plates, conflicting details and multiple matches, the engine agrees with every label, and its 42 automatic corrections are all correct.
+- **Cleansing the live agency data (🗄️ Agency Data tab):** scans all five agency databases through their own services for noisy identifiers (misreads, typos, formatting, unregistered plates, suspicious registry entries), applies the same rules using the row's own make/model/colour or a camera sighting of the same reading, and **writes corrections back** to the agency database. Uncertain rows go to a reviewer, unregistered plates are flagged, nothing is deleted, and VAHAN is never auto-edited. Inserts, updates and deletes made in the SQL REPL are picked up immediately.
 - **Audit:** the original records and an append-only correction audit trail (vehicle ID, similarity, reason, status, reviewer) are protected by SQLite triggers. Reviewer decisions supersede rule-engine rows and are never overwritten.
-- **Integrated:** a Mediator blueprint (`/api/v1/matching/*`), a federated VAHAN registry-index endpoint, and "did you mean" suggestions in the Vehicle Inspector for unregistered plates.
+- **Audit of agency changes:** every value written back is logged in `dq_agency_corrections` with the original value, row, rule and reason (append-only).
+- **Integrated:** a Mediator blueprint (`/api/v1/matching/*`), identifier endpoints on all five services, write-back through each service, dossier-cache refresh after a correction, and "did you mean" suggestions in the Vehicle Inspector for unregistered plates.
 
 ```bash
 python -m matching.evaluation      # print the algorithm comparison (≈30s)
@@ -119,7 +121,7 @@ python -m matching.evaluation      # print the algorithm comparison (≈30s)
 |:---|:---:|:---|:---|:---|
 | **Frontend Web App** | `3000` | Static HTML / CSS / JS | N/A | Dynamic Hostname (`window.location.hostname`) |
 | **Central Mediator** | `5001` | `backend/dwh/warehouse_dwh.db` | `mv_vehicle_complete_history` | `vehicle_identifier` |
-| **Mediator: Data Quality** | `5001` | `backend/dwh/data_quality.db` | `dq_noisy_records`, `dq_plate_corrections` | normalised plate → VAHAN `registration_id` |
+| **Mediator: Data Quality** | `5001` | `backend/dwh/data_quality.db` | `dq_noisy_records`, `dq_plate_corrections`, `dq_agency_corrections` | normalised plate → VAHAN `registration_id` |
 | **IIB Insurance Service** | `5002` | `backend/IIB/insurance_iib.db` | `policies` | `registration_no` |
 | **MoRTH VAHAN Registry** | `5003` | `backend/VAHAN/parivahan_vahan.db` | `vehicle_registrations` | `vehicle_registration_id` |
 | **Police CCTNS & RVSF** | `5004` | `backend/POLICE_CCTNS/theft_scrap.db` | `vehicle_status` | `vehicle_no` |
@@ -173,10 +175,10 @@ Test these pre-seeded vehicle plates directly in the Vehicle Search or Inspector
 
 ## 📊 Verification & Automated Test Suite
 
-VehicleSentinel includes a 100% passing automated test suite with **80 tests**: 49 validating the evaluation rubric and 31 covering approximate matching & data cleansing ([`tests/test_matching.py`](tests/test_matching.py)):
+VehicleSentinel includes a 100% passing automated test suite with **116 tests**: 49 validating the original evaluation rubric, 63 covering approximate matching, OCR and data cleansing ([`test_matching.py`](tests/test_matching.py), [`test_plate_ocr.py`](tests/test_plate_ocr.py), [`test_matching_sources.py`](tests/test_matching_sources.py), [`test_agency_cleansing.py`](tests/test_agency_cleansing.py)) and 4 for the e-Challan webhook:
 
 ```bash
-# Run the complete test suite (80/80 passing)
+# Run the complete test suite (116/116 passing)
 pytest -v
 
 # Run the strict 18-point data and schema integrity validation

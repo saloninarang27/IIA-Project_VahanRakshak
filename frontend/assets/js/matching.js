@@ -172,6 +172,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-reprocess').addEventListener('click', () => cleanse(true));
   document.getElementById('btn-run-eval').addEventListener('click', runEvaluation);
   document.getElementById('btn-audit-more').addEventListener('click', () => loadAudit(true));
+  document.getElementById('btn-refresh-index').addEventListener('click', refreshPlateIndex);
+  document.getElementById('btn-agency-scan').addEventListener('click', scanAgency);
+  document.getElementById('btn-agency-cleanse').addEventListener('click', cleanseAgency);
 
   await loadConfig();
   const initial = new URLSearchParams(window.location.search);
@@ -187,6 +190,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${tab}`));
   if (tab === 'records') loadRecords();
+  if (tab === 'agency') scanAgency();
   if (tab === 'eval' && !evaluationLoaded) loadEvaluation();
   if (tab === 'audit') loadAudit(false);
 }
@@ -969,4 +973,191 @@ async function loadAudit(append) {
   else tbody.insertAdjacentHTML('beforeend', rows);
   auditOffset += data.entries.length;
   document.getElementById('btn-audit-more').style.display = auditOffset < data.total ? '' : 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Agency data: scan the five live agency databases, apply corrections, review
+// ---------------------------------------------------------------------------
+const AGENCY_LABEL = { VAHAN: 'VAHAN', IIB: 'IIB', POLICE: 'Police', ANPR: 'ANPR', ECHALLAN: 'e-Challan' };
+const KIND_LABEL = {
+  UNREGISTERED_PLATE: 'Not a registered plate',
+  NON_CANONICAL_FORMAT: 'Formatting',
+  MISSING_IDENTIFIER: 'Missing identifier',
+  SUSPECT_REGISTRATION: 'Suspicious registry entry',
+};
+const ACTION_BADGE = {
+  UPDATE: ['badge-info', '✏️ Correct'],
+  REVIEW: ['badge-warning', '⚠️ Review'],
+  REJECT: ['badge-danger', '⛔ Flag (not registered)'],
+};
+let agencyAnomalies = [];
+
+async function refreshPlateIndex() {
+  const btn = document.getElementById('btn-refresh-index');
+  btn.disabled = true;
+  await API.refreshMatchingIndex().catch(() => null);
+  await loadConfig();
+  btn.disabled = false;
+}
+
+async function scanAgency() {
+  const tbody = document.getElementById('agency-tbody');
+  const meta = document.getElementById('agency-meta');
+  tbody.innerHTML = '<tr><td colspan="10" class="empty-note"><span class="spinner-inline"></span> Reading all five agency databases…</td></tr>';
+  const { ok, data } = await API.scanAgencyData().catch(err => ({ ok: false, data: { error: err.message } }));
+  if (!ok) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-note" style="color:var(--status-danger);">${esc(data.error)}</td></tr>`;
+    return;
+  }
+  agencyAnomalies = data.anomalies;
+  const rowsRead = data.sources.reduce((sum, s) => sum + (s.rows || 0), 0);
+  const failed = data.sources.filter(s => s.error);
+  meta.innerHTML = `${rowsRead.toLocaleString()} rows read from ${data.sources.length - failed.length}/${data.sources.length} databases
+    against ${data.registered_vehicles.toLocaleString()} registered vehicles • ${data.duration_ms} ms`
+    + (failed.length ? ` • <span style="color:var(--status-danger);">unreachable: ${failed.map(s => esc(s.key)).join(', ')}</span>` : '');
+  renderAgencySummary(data.summary);
+  renderAgencyRows();
+  loadAgencyChanges();
+}
+
+function renderAgencySummary(s) {
+  const by = s.by_action || {};
+  const card = (cls, label, value, sub) => `
+    <div class="stat-card ${cls}" style="padding:1rem;">
+      <div class="stat-label">${label}</div>
+      <div class="stat-value" style="font-size:1.6rem;">${value}</div>
+      <div class="stat-subtext">${sub}</div>
+    </div>`;
+  document.getElementById('agency-summary').innerHTML = [
+    card('info', 'Noisy identifiers', s.open, `${s.resolved_by_reviewer} already resolved by a reviewer`),
+    card('info', 'Will be corrected', by.UPDATE || 0, 'enough evidence — written back on Apply'),
+    card('warning', 'Need review', by.REVIEW || 0, 'conflict / ambiguity / weak evidence'),
+    card('danger', 'Not registered', by.REJECT || 0, 'flagged, never deleted'),
+  ].join('');
+}
+
+function renderAgencyRows() {
+  const tbody = document.getElementById('agency-tbody');
+  if (!agencyAnomalies.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="empty-note">✅ No anomalies: every vehicle identifier in the five databases is a clean registered plate.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = agencyAnomalies.map((a, i) => {
+    const s = a.assessment;
+    const [cls, label] = a.resolved ? ['badge-success', '👤 Resolved'] : (ACTION_BADGE[a.action] || ['badge-info', a.action]);
+    const evidence = Object.entries(a.context || {}).filter(([, v]) => v).map(([, v]) => esc(v)).join(' • ');
+    const target = a.new_value
+      ? renderPlateDiff(s.normalized_plate, a.new_value)
+      : (s.suggested_plate ? `<span style="color:var(--text-muted); font-size:0.75rem;">suggest</span> ${renderPlateDiff(s.normalized_plate, s.suggested_plate)}` : '—');
+    const status = a.latest ? `<br><span style="font-size:0.7rem; color:var(--text-muted);">${esc(a.latest.decision_status)}</span>` : '';
+    return `
+      <tr>
+        <td style="font-size:0.8rem;"><strong>${esc(AGENCY_LABEL[a.source] || a.source)}</strong><br><span style="color:var(--text-muted);">${esc(a.table)}.${esc(a.column)}</span></td>
+        <td class="mono">${a.row_id}</td>
+        <td class="mono">${a.original_value === null ? '<em>NULL</em>' : `"${esc(a.original_value)}"`}</td>
+        <td style="font-size:0.8rem;">${esc(KIND_LABEL[a.kind] || a.kind)}</td>
+        <td style="font-size:0.78rem;">${evidence || '<span style="color:var(--text-muted);">none</span>'}${a.context_from ? `<br><span style="color:var(--text-muted);">from ${esc(a.context_from)}</span>` : ''}</td>
+        <td><span class="badge ${cls}">${label}</span>${status}</td>
+        <td>${target}</td>
+        <td>${scoreCell(s.similarity_score)}</td>
+        <td class="reason-col" title="${esc(s.reason)}">${esc(s.rule || '')} ${esc(s.reason_code || '')}</td>
+        <td>${a.resolved ? '' : `<button class="btn btn-secondary btn-sm" type="button" onclick="openAgencyRow(${i})">Review</button>`}</td>
+      </tr>`;
+  }).join('');
+}
+
+async function cleanseAgency() {
+  const btn = document.getElementById('btn-agency-cleanse');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span> Applying…';
+  const { ok, data } = await API.cleanseAgencyData().catch(err => ({ ok: false, data: { error: err.message } }));
+  btn.disabled = false;
+  btn.innerHTML = original;
+  setModalWide(false);
+  if (!ok) {
+    AppModal.alert('Cleansing failed', data.error, '❌');
+    return;
+  }
+  const lines = Object.entries(data.outcome).map(([k, v]) => `${k}: ${v}`).join('\n') || 'Nothing new to change.';
+  const errors = data.errors.length ? `\n\nNot applied:\n${data.errors.join('\n')}` : '';
+  AppModal.alert('Agency data cleansed',
+    `${data.changed_plates.length} row(s) corrected in the agency databases (${data.duration_ms} ms).\n` +
+    `${data.skipped_reviewed} row(s) already decided by a reviewer were left alone.\n\n${lines}${errors}`, '🧹');
+  scanAgency();
+}
+
+function openAgencyRow(i) {
+  const a = agencyAnomalies[i];
+  const s = a.assessment;
+  const overlay = AppModal.getOverlay();
+  setModalWide(true);
+  document.getElementById('app-modal-title').innerHTML =
+    `<span>🗄️</span> <span>${esc(AGENCY_LABEL[a.source] || a.source)} · ${esc(a.table)} row ${a.row_id}</span>`;
+  const options = (s.candidates || []).map(c =>
+    `<option value="${esc(c.plate)}">${esc(c.plate)} — #${c.vehicle_id ?? '?'} ${esc(c.make)} ${esc(c.model)}, ${esc(c.color)} (${fmt(c.combined_score)})</option>`).join('');
+  document.getElementById('app-modal-body').innerHTML = `
+    ${renderDecisionCard({ ...s, original_plate: a.original_value, method: null }, { hideAudit: true })}
+    <div class="section-title">Review decision</div>
+    <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+      <div><label class="mini-label" for="ag-action">Action</label>
+        <select class="form-select" id="ag-action">
+          <option value="CORRECT">Correct to registered plate (updates ${esc(AGENCY_LABEL[a.source])})</option>
+          <option value="ACCEPT_ORIGINAL">Accept original value</option>
+          <option value="REJECT">Reject (keep flagged)</option>
+        </select></div>
+      <div><label class="mini-label" for="ag-plate">Corrected plate</label>
+        <select class="form-select" id="ag-plate">${options || '<option value="">No candidates</option>'}</select></div>
+      <div><label class="mini-label" for="ag-reviewer">Reviewer ID</label>
+        <input class="form-input" id="ag-reviewer" value="${esc(localStorageGet('reviewer') || 'officer.demo')}"></div>
+    </div>
+    <div style="margin-top:0.6rem;"><label class="mini-label" for="ag-note">Reason / note</label>
+      <input class="form-input" id="ag-note" placeholder="e.g. verified against the RC"></div>`;
+  if (s.suggested_plate || s.corrected_plate) document.getElementById('ag-plate').value = s.corrected_plate || s.suggested_plate;
+  document.getElementById('app-modal-footer').innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="AppModal.close()">Close</button>
+    <button class="btn btn-primary btn-sm" onclick="submitAgencyReview(${i})">Save decision</button>`;
+  overlay.classList.add('active');
+}
+
+async function submitAgencyReview(i) {
+  const a = agencyAnomalies[i];
+  const payload = {
+    source: a.source, row_id: a.row_id, original_value: a.original_value,
+    action: document.getElementById('ag-action').value,
+    corrected_plate: document.getElementById('ag-plate').value,
+    reviewer: document.getElementById('ag-reviewer').value.trim(),
+    note: document.getElementById('ag-note').value.trim(),
+  };
+  localStorageSet('reviewer', payload.reviewer);
+  const { ok, data } = await API.reviewAgencyRow(payload);
+  setModalWide(false);
+  if (!ok) {
+    AppModal.alert('Decision not saved', data.error, '❌');
+    return;
+  }
+  AppModal.alert('Decision saved', data.applied
+    ? `${AGENCY_LABEL[a.source]} row ${a.row_id} updated: "${a.original_value}" → ${data.new_value}.\nChange #${data.change_id} keeps the original value.`
+    : `Change #${data.change_id} recorded. The ${AGENCY_LABEL[a.source]} row was not modified.`, '✅');
+  scanAgency();
+}
+
+async function loadAgencyChanges() {
+  const tbody = document.getElementById('agency-changes-tbody');
+  const { ok, data } = await API.getAgencyChanges({ limit: 50 }).catch(err => ({ ok: false, data: { error: err.message } }));
+  if (!ok) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-note" style="color:var(--status-danger);">${esc(data.error)}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.entries.map(e => `
+    <tr>
+      <td class="mono">#${e.change_id}</td>
+      <td style="font-size:0.75rem;">${esc(e.created_at)}</td>
+      <td style="font-size:0.78rem;">${esc(AGENCY_LABEL[e.source_system] || e.source_system)} · ${esc(e.table_name)} #${e.row_id}</td>
+      <td class="mono">${e.original_value === null ? '<em>NULL</em>' : `"${esc(e.original_value)}"`}</td>
+      <td>${e.new_value ? renderPlateDiff(normalizePlate(e.original_value), e.new_value) : '—'}</td>
+      <td><span class="badge ${e.applied ? 'badge-info' : 'badge-warning'}">${esc(e.decision_status)}</span></td>
+      <td class="reason-col" title="${esc(e.reason)}">${esc(e.reason_code || '')}</td>
+      <td style="font-size:0.78rem;">${esc(e.decided_by)}</td>
+    </tr>`).join('') || '<tr><td colspan="8" class="empty-note">No changes yet.</td></tr>';
 }

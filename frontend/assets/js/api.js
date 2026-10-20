@@ -108,6 +108,19 @@ const API = {
 
   runMatchingEvaluation() { return this._matching('/evaluation/run', { method: 'POST' }); },
 
+  refreshMatchingIndex() { return this._matching('/index/refresh', { method: 'POST' }); },
+
+  scanAgencyData() { return this._matching('/agency/scan'); },
+
+  cleanseAgencyData() { return this._matching('/agency/cleanse', this._json('POST', {})); },
+
+  reviewAgencyRow(payload) { return this._matching('/agency/review', this._json('POST', payload)); },
+
+  getAgencyChanges(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return this._matching(`/agency/changes${q ? `?${q}` : ''}`);
+  },
+
   async verifySqlAuth(credentials) {
     const res = await fetch(`${MEDIATOR_BASE_URL}/sql/auth`, {
       method: 'POST',

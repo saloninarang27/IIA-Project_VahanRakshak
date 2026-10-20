@@ -25,6 +25,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import backend.config as config
+from matching.normalize import normalize_plate
 from ministry.rules import (
     compute_insurance_status,
     compute_suspicion_status,
@@ -277,7 +278,18 @@ def upsert_cache(dossier):
 # ---------------------------------------------------------------------------
 from backend import matching_api
 
-matching_api.configure(_fetch_service)
+def mark_vehicles_stale(plates):
+    """Expire cached dossiers so the next lookup re-federates (used after data is cleansed)."""
+    past = (datetime.now() - timedelta(days=3650)).isoformat(sep=" ")
+    plates = [normalize_plate(p) for p in plates if normalize_plate(p)]
+    if not plates:
+        return
+    with get_dwh_conn() as conn:
+        conn.executemany("UPDATE mv_vehicle_complete_history SET refreshed_at = ? WHERE vehicle_identifier = ?",
+                         [(past, p) for p in plates])
+        conn.commit()
+
+matching_api.configure(_fetch_service, on_vehicles_changed=mark_vehicles_stale)
 app.register_blueprint(matching_api.matching_bp)
 
 def _attach_approximate_matches(vehicle):
@@ -344,7 +356,7 @@ def get_schema_mappings():
 
 @app.route("/api/v1/vehicles/<plate_number>", methods=["GET"])
 def get_vehicle(plate_number):
-    clean_plate = plate_number.strip().upper().replace(" ", "").replace("-", "")
+    clean_plate = normalize_plate(plate_number)
     force_sync = request.args.get("force_sync", "false").lower() == "true"
 
     # Step 1: Check Global Cache in DWH
@@ -462,7 +474,7 @@ def get_vehicle(plate_number):
 @app.route("/api/v1/vehicles/<plate_number>/trace", methods=["GET"])
 def get_federated_trace(plate_number):
     """Returns detailed trace of the 5 decomposed API calls and raw payloads."""
-    clean_plate = plate_number.strip().upper().replace(" ", "").replace("-", "")
+    clean_plate = normalize_plate(plate_number)
     api_results = fetch_all_agency_apis(clean_plate)
     return jsonify({
         "plate": clean_plate,
@@ -519,18 +531,11 @@ def get_federated_trace(plate_number):
 @app.route("/api/v1/sync/invalidate", methods=["POST"])
 def invalidate_cache():
     data = request.get_json(force=True) or {}
-    vehicle_id = data.get("vehicle_identifier", "").strip().upper().replace(" ", "").replace("-", "")
+    vehicle_id = normalize_plate(data.get("vehicle_identifier"))
     if not vehicle_id:
         return jsonify({"error": "Missing vehicle_identifier"}), 400
 
-    # Mark as expired in cache by setting refreshed_at to 10 years ago
-    past = (datetime.now() - timedelta(days=3650)).isoformat(sep=" ")
-    with get_dwh_conn() as conn:
-        conn.execute(
-            "UPDATE mv_vehicle_complete_history SET refreshed_at = ? WHERE vehicle_identifier = ?",
-            (past, vehicle_id)
-        )
-        conn.commit()
+    mark_vehicles_stale([vehicle_id])
 
     return jsonify({
         "message": f"Cache invalidated for {vehicle_id}",
@@ -645,7 +650,7 @@ def issue_echallan():
         challan_resp = json.loads(resp.read().decode("utf-8"))
 
     # Force re-sync of this vehicle in Mediator cache
-    clean_id = data.get("vehicle_identifier", "").strip().upper()
+    clean_id = normalize_plate(data.get("vehicle_identifier"))
     if clean_id:
         api_results = fetch_all_agency_apis(clean_id)
         dossier = merge_to_global_dossier(clean_id, api_results)
@@ -863,27 +868,12 @@ def sql_execute():
             res_data = json.loads(raw)
             hop_time = round((time.time() - t0) * 1000, 2)
 
-        # Direct Database File Update: Update local database directly on disk
+        # The agency microservice has already applied the statement to its own database; it is the
+        # only writer. (Re-running it here against a "local copy" applied every INSERT twice when the
+        # services run on this machine, because that copy is the same file.)
         is_mutation = any(query.strip().upper().startswith(kw) for kw in ("UPDATE", "INSERT", "DELETE", "REPLACE", "ALTER", "CREATE", "DROP"))
         if is_mutation and res_data.get("status") == "success":
-            local_db_map = {
-                "iib": config.DB_IIB,
-                "vahan": config.DB_VAHAN,
-                "police": config.DB_POLICE,
-                "anpr": config.DB_ANPR,
-                "echallan": config.DB_ECHALLAN
-            }
-            local_db = local_db_map.get(target)
-            if local_db and os.path.exists(local_db):
-                try:
-                    with sqlite3.connect(local_db, timeout=10.0) as local_conn:
-                        local_conn.execute("PRAGMA journal_mode = WAL")
-                        local_conn.execute(query)
-                        local_conn.commit()
-                except Exception as ex:
-                    print(f"[!] Direct DB update note: {ex}")
-            if target == "vahan":
-                matching_api.invalidate_index()  # registry changed -> rebuild the matcher's reference index
+            matching_api.invalidate_index()  # plates changed in an agency database -> rebuild the matcher's index
 
         return jsonify({
             "status": res_data.get("status", "success"),

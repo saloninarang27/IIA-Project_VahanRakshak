@@ -87,4 +87,7 @@ DB_DATA_QUALITY = os.path.join(BASE_DIR, "dwh", "data_quality.db")  # noisy-reco
 # Cache & Simulation Settings
 # ---------------------------------------------------------------------------
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", 300))  # 5 minutes TTL
+# Plate list used by approximate matching (all five agencies). Rebuilding it takes ~80 ms, so it is
+# kept short: records inserted / changed / deleted in any agency database show up within seconds.
+MATCHING_INDEX_TTL_SECONDS = int(os.environ.get("MATCHING_INDEX_TTL_SECONDS", 15))
 SIMULATION_TODAY = date(2026, 9, 14)

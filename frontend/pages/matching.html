@@ -41,17 +41,22 @@
         <div>
           <h2 style="font-size:1.5rem; font-weight:800;">🧩 Approximate Vehicle Matching & Data Cleansing</h2>
           <p style="font-size:0.85rem; color:var(--text-muted); max-width:820px; line-height:1.5;">
-            Match scanned or noisy registration numbers against the MoRTH VAHAN registry using Jaro–Winkler,
-            Levenshtein and an OCR-aware edit distance, then decide — with make, model, colour and type as
-            evidence — whether to accept, correct, reject or flag each record. Original data is never modified;
-            every decision is appended to an audit trail.
+            Match scanned or noisy registration numbers against the plates held by all five agency databases
+            (VAHAN, IIB, Police, ANPR, e-Challan) using Jaro–Winkler, Levenshtein and an OCR-aware edit distance,
+            then decide — with make, model, colour and type as evidence — whether to accept, correct, reject or
+            flag each record. Noisy identifiers in the agency databases themselves are corrected in place; every
+            decision is logged with the original value.
           </p>
         </div>
-        <span class="badge badge-info" id="index-meta">Loading registry index…</span>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.4rem;">
+          <span class="badge badge-info" id="index-meta">Loading registry index…</span>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-index" type="button">↻ Refresh plate list</button>
+        </div>
       </div>
 
       <div class="tab-bar" role="tablist">
         <button class="tab-btn active" data-tab="scan" role="tab">📷 Scan &amp; Match</button>
+        <button class="tab-btn" data-tab="agency" role="tab">🗄️ Agency Data</button>
         <button class="tab-btn" data-tab="records" role="tab">🧹 Noisy Records</button>
         <button class="tab-btn" data-tab="eval" role="tab">📊 Algorithm Evaluation</button>
         <button class="tab-btn" data-tab="audit" role="tab">🧾 Audit Trail</button>
@@ -112,10 +117,54 @@
       </section>
 
       <!-- ================= Noisy Records ================= -->
+      <section class="tab-panel" id="tab-agency">
+        <p class="section-sub">
+          Scans the live records of all five agency databases — through each agency's own service — for vehicle
+          identifiers that are not a clean registered plate: OCR misreads, typos, formatting noise, unregistered plates
+          and suspicious registry entries. Each one is decided by the same rules (R1–R9) using the make, model, colour
+          and type found in that row, or in a camera sighting of the same reading. <strong>Apply</strong> writes the
+          corrections back to the agency database; uncertain rows wait for a reviewer. The original value of every
+          changed row is kept in the change log.
+        </p>
+        <div class="stats-grid" id="agency-summary"></div>
+        <div class="toolbar">
+          <div class="group">
+            <span class="section-sub" id="agency-meta" style="margin:0;">Not scanned yet.</span>
+          </div>
+          <div class="group">
+            <button class="btn btn-secondary btn-sm" id="btn-agency-scan" type="button">🔍 Scan agency databases</button>
+            <button class="btn btn-primary btn-sm" id="btn-agency-cleanse" type="button">🧹 Apply cleansing</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Database</th><th>Row</th><th>Found value</th><th>Problem</th><th>Evidence</th>
+                <th>Decision</th><th>Will become</th><th>Similarity</th><th>Reason</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="agency-tbody"><tr><td colspan="10" class="empty-note">Click “Scan agency databases”.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="section-title">Change log (agency databases)</div>
+        <div class="section-sub">Every decision on agency data, newest first. Rows are never edited or deleted.</div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr><th>#</th><th>Time</th><th>Database · row</th><th>Original value</th><th>New value</th>
+                  <th>Status</th><th>Reason</th><th>Decided by</th></tr>
+            </thead>
+            <tbody id="agency-changes-tbody"><tr><td colspan="8" class="empty-note">No changes yet.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="tab-panel" id="tab-records">
         <p class="section-sub">
-          Records staged from agency feeds (ANPR camera reads, insurer entries, police FIRs, e-challans) whose
-          registration numbers may be corrupted. This is the reverse direction: each noisy record is matched to
+          A fixed, labelled test set of 112 records staged from agency feeds (ANPR camera reads, insurer entries,
+          police FIRs, e-challans) whose registration numbers were corrupted on purpose, so the rule engine's accuracy
+          can be measured. This is the reverse direction: each noisy record is matched to
           its potential registered vehicles. Click a row for the candidate analysis and to review it.
         </p>
         <div class="stats-grid" id="records-summary"></div>

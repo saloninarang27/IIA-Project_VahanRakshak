@@ -6,34 +6,41 @@ mistyped by an insurer, or entered with spaces and hyphens. It does two jobs.
 1. **Approximate matching.** It takes a plate (uploaded image → OCR, or text), finds every plausible registered
    vehicle and ranks them by similarity.
 2. **Data cleansing.** It decides, using make / model / colour / type as evidence, whether each record should be
-   **accepted, corrected, rejected or flagged for review**. Every decision is logged in an append-only audit trail,
-   and the original data is never changed.
+   **accepted, corrected, rejected or flagged for review**, and writes the corrections back into the five agency
+   databases. Every decision is logged in an append-only audit trail that keeps the original value.
 
 | Piece | Location |
 |---|---|
 | Algorithms, matcher, rules, evaluation | [`matching/`](../matching/) |
 | REST API (Mediator blueprint) | [`backend/matching_api.py`](../backend/matching_api.py) → `/api/v1/matching/*` |
-| Registry index (federated) | VAHAN `GET /api/v1/registry/index` ([`backend/VAHAN/vahan_service.py`](../backend/VAHAN/vahan_service.py)) |
+| The five databases (single map) | [`matching/sources.py`](../matching/sources.py): table, identifier column, key, context columns, service URL per agency |
+| Plate lists (federated) | VAHAN `GET /api/v1/registry/index`, IIB / Police / ANPR / e-Challan `GET /api/v1/identifiers` |
+| Agency-data cleansing | [`matching/agency_cleansing.py`](../matching/agency_cleansing.py) → 🗄️ Agency Data tab |
 | Staging + audit schema | [`schemas/data_quality_schema.sql`](../schemas/data_quality_schema.sql) → `backend/dwh/data_quality.db` |
 | UI | [`frontend/pages/matching.html`](../frontend/pages/matching.html) (🧩 Plate Matching), plus "did you mean" in the Vehicle Inspector |
-| Tests | [`tests/test_matching.py`](../tests/test_matching.py) (31 tests) |
+| Tests | [`test_matching.py`](../tests/test_matching.py) (31), [`test_plate_ocr.py`](../tests/test_plate_ocr.py) (15), [`test_matching_sources.py`](../tests/test_matching_sources.py) (5), [`test_agency_cleansing.py`](../tests/test_agency_cleansing.py) (12) |
 
 ## Pipeline
 
 ```
 plate image ──► OCR ──► raw text ──► normalise ──► score vs. every registered plate ──► candidates ≥ threshold
-                (server: pytesseract/easyocr          (uppercase,        (Jaro–Winkler, Levenshtein,         │
-                 if installed, else Tesseract.js       strip separators)   OCR-weighted, hybrid)               ▼
+                (server: RapidOCR / pytesseract /     (uppercase,        (Jaro–Winkler, Levenshtein,         │
+                 easyocr, else Tesseract.js            strip separators)   OCR-weighted, hybrid)               ▼
                  in the browser)                                                          context comparison (make/model/colour/type)
                                                                                                              │
                                                                          ACCEPT / CORRECT / REJECT / REVIEW ◄┘ rule engine R1–R9
                                                                                                              │
-                                                                                     append-only audit trail ◄┘
+                                                    write-back to the agency database + append-only audit ◄┘
 ```
 
-The reference index is pulled from the VAHAN microservice through the Mediator's federated fetcher, so the Mediator
-never reads another agency's database directly. It is cached for `CACHE_TTL_SECONDS` and invalidated when the SQL
-REPL changes the VAHAN database. If VAHAN is offline, the local VAHAN replica is used and the UI says so.
+The plate list is federated from **all five** agency microservices in parallel (VAHAN `/registry/index`, the others
+`/identifiers`), so the Mediator never reads another agency's database file directly. Lists are merged by
+normalised plate; every candidate shows which databases hold it ("Found in"), and a plate missing from VAHAN but
+present elsewhere is matched and flagged `NOT_IN_VAHAN`. Because another agency may have stored a *noisy*
+value, such an exact hit is first checked against the registered vehicles: if it is a correctable misread of one
+(R7 / R8), it is corrected rather than accepted. Rebuilding the list takes ≈ 80 ms, so it is cached for only
+`MATCHING_INDEX_TTL_SECONDS` (15 s) and rebuilt immediately after any SQL REPL write. If a service is offline, its
+local replica is used (or it is reported unavailable) and the header shows e.g. "4/5 live".
 
 ## Algorithms
 
@@ -157,6 +164,60 @@ While building the fixtures we found that some vehicles are genuinely indistingu
 for example, have identical make, model, colour and type. The engine correctly refuses to choose between them, so such
 cases are labelled MULTIPLE_MATCHES rather than "correctable".
 
+## Cleansing the live agency databases (rubric 2)
+
+The staged test set above measures the rule engine. The **🗄️ Agency Data** tab applies the same engine to the real
+recorded data: the five agency databases, read and written **through each agency's own microservice** (so it works
+when the databases run on other machines). Code: [`matching/agency_cleansing.py`](../matching/agency_cleansing.py).
+
+1. **Scan.** Every row of `vehicle_registration`, `insurance_policy`, `theft_scrap_record`, `vehicle_capture` and
+   `ministry_report` is read through `POST /api/v1/internal/execute-sql` on its service (≈ 8,300 rows, ≈ 0.4 s).
+   VAHAN is the reference for what a registered plate is. A row is an anomaly if its identifier is:
+
+   | Kind | Example | Action |
+   |---|---|---|
+   | `UNREGISTERED_PLATE` | `DL01AB1O01` in IIB | rules R1–R9 decide: correct, review or flag |
+   | `NON_CANONICAL_FORMAT` | `dl 01-ab 1004` in Police | standardised to `DL01AB1004` |
+   | `MISSING_IDENTIFIER` | empty string | flagged (R1) |
+   | `SUSPECT_REGISTRATION` | `DL01AB1O05` inserted into VAHAN, same car as `DL01AB1005` | review only: the registry is never changed automatically |
+
+2. **Evidence.** Context comes from the row itself (ANPR rows have make, model, colour and type). IIB, Police and
+   e-Challan rows have none, so the cleanser borrows it from an **ANPR sighting of the same reading** when one exists.
+   Without any context, only a pure OCR-glyph misread (R8) is corrected; everything else goes to review.
+3. **Apply.** `CORRECT` and formatting fixes are written back with
+   `UPDATE <table> SET <id column> = '<registered plate>' WHERE <pk> = <row> AND <id column> = '<value scanned>'`,
+   so a row changed in the meantime is never overwritten. `REVIEW` rows are queued, unregistered plates are flagged,
+   and **nothing is ever deleted**.
+4. **Review.** A reviewer can correct a queued row to a registered plate (written back), accept the original, or
+   reject it. Rows a reviewer has decided are never re-flagged.
+5. **Consistency.** After a write-back the matcher's plate list is rebuilt and the cached dossiers of the affected
+   plates are expired, so the Vehicle Inspector immediately shows the cleansed data.
+
+Every decision is logged in `dq_agency_corrections` (append-only): database, table, row, column, **original value**,
+new value, whether it was applied, matched vehicle, similarity, context source, decision, rule, reason and decider.
+
+Measured live against the running services: inserting `DL01AB1O01` into IIB, a silver Renault Kwid sighting
+`DL01AB124` into ANPR, `DL01AB129` into Police and `MH12XY4821` into e-Challan gave **correct → DL01AB1001 (R8)**,
+**correct → DL01AB1234 (R7)**, **review (R5, ambiguous)** and **flag (R2)**. The first two rows were updated in their
+databases, and a rescan showed only the two rows awaiting a decision.
+
+### Live evaluation script (insert / delete / modify)
+
+The evaluator changes data in the SQL REPL; the plate list refreshes immediately after any REPL write (and within 15 s
+for changes made any other way, or click **↻ Refresh plate list**).
+
+| Evaluator does (SQL REPL) | Then show | Expected |
+|---|---|---|
+| target **IIB**: `INSERT INTO insurance_policy (registration_no, insurer_name, policy_number, policy_start_date, policy_expiry_date, insurance_status) VALUES ('DL01AB1O01', 'Demo', 'POL-DEMO-1', '2026-01-01', '2027-01-01', 'ACTIVE');` | Agency Data → Scan → Apply | corrected to `DL01AB1001` (R8); REPL `SELECT` shows the new value; change log keeps `DL01AB1O01` |
+| target **ANPR**: insert a sighting `DL01AB124` with `detected_make='Renault', detected_model='Kwid', detected_color='Silver'` | Scan → Apply | corrected to `DL01AB1234` using the camera's attributes (R7) |
+| target **Police**: `UPDATE theft_scrap_record SET vehicle_no = 'dl 01-ab 1004' WHERE vehicle_no = 'DL01AB1004';` | Scan → Apply | standardised back to `DL01AB1004` |
+| target **e-Challan**: insert a challan for `MH12XY4821` | Scan | flagged *Not registered*, not deleted |
+| target **VAHAN**: `DELETE FROM vehicle_registration WHERE vehicle_registration_id = 'DL01AB1003';` | Scan / Scan & Match | the vehicle's camera rows become anomalies; matching no longer offers `DL01AB1003` |
+| target **VAHAN**: insert `DL01AB1O05` with the same make/model/colour as `DL01AB1005` | Scan | *Suspicious registry entry* → review; VAHAN is not auto-edited |
+| any row to **Review** | Review → Correct | the chosen registered plate is written to that agency table |
+
+`python setup.py` restores the original data afterwards.
+
 ## Audit trail & original-data preservation (items 17–19)
 
 - `dq_noisy_records` holds the staged records exactly as received. SQLite triggers abort any `UPDATE` or `DELETE`.
@@ -169,6 +230,8 @@ cases are labelled MULTIPLE_MATCHES rather than "correctable".
   a human decision.
 - `v_dq_cleansed_records` shows the original plate next to the effective (corrected) plate.
 - Ad-hoc scans from the UI are logged as well (`record_id` NULL, source `ANPR_UPLOAD` / `MANUAL_ENTRY`).
+- Corrections written to the agency databases are logged in `dq_agency_corrections`, also append-only, with the
+  original value of every changed row (see above). `v_dq_agency_latest` gives the current decision per row.
 
 ## API
 
@@ -183,6 +246,11 @@ cases are labelled MULTIPLE_MATCHES rather than "correctable".
 | POST | `/api/v1/matching/cleanse` | `{reprocess?, record_ids?, method?}` → run the rule engine |
 | GET | `/api/v1/matching/audit?record_id=&limit=&offset=` | audit trail |
 | GET / POST | `/api/v1/matching/evaluation` / `/evaluation/run` | stored / fresh algorithm comparison |
+| POST | `/api/v1/matching/index/refresh` | rebuild the five-database plate list now |
+| GET | `/api/v1/matching/agency/scan` | anomalies in the five agency databases with the proposed action |
+| POST | `/api/v1/matching/agency/cleanse` | apply: write corrections back, flag / queue the rest |
+| POST | `/api/v1/matching/agency/review` | `{source, row_id, original_value, action, corrected_plate?, reviewer, note?}` |
+| GET | `/api/v1/matching/agency/changes` | append-only log of agency-data decisions |
 
 `GET /api/v1/vehicles/<plate>` also returns `approximate_matches` when VAHAN has no record of the plate. The Vehicle
 Inspector shows these as "did you mean" suggestions.
@@ -221,22 +289,22 @@ one-click alternatives. The raw text, engine and confidence are logged, and the 
 | # | Requirement | Where |
 |---|---|---|
 | 1 | Upload plate image | Scan & Match tab (drop / browse / samples) → `POST /matching/ocr` |
-| 2 | OCR extraction | `matching/ocr.py` (pytesseract / easyocr) or Tesseract.js fallback |
+| 2 | OCR extraction | `matching/ocr.py` (RapidOCR / pytesseract / easyocr + plate selection) or Tesseract.js fallback |
 | 3 | Normalisation | `matching/normalize.py::normalize_plate` |
 | 4 | Jaro–Winkler | `matching/similarity.py::jaro_winkler` |
 | 5 | Levenshtein | `matching/similarity.py::levenshtein_distance` |
 | 6 | Compare & select | `matching/evaluation.py`, Evaluation tab, table above |
-| 7 | All plausible matches | `matching/matcher.py::find_candidates` (threshold, not exact) |
+| 7 | All plausible matches | `matching/matcher.py::find_candidates` over plates from all five databases (threshold, not exact) |
 | 8 | Ranked with scores | candidate table (all four method scores + context + combined) |
-| 9 | Both directions | Scan & Match (plate → records) and Noisy Records (records → candidates) |
+| 9 | Both directions | Scan & Match (plate → records); Agency Data and Noisy Records (records → candidates) |
 | 10 | OCR errors (O/0, I/1 …) | `OCR_CONFUSION_CASES`, `ocr_1` / `ocr_2` noise types |
 | 11 | Precision / recall / F1 | `run_evaluation`, table above |
-| 12 | Integrated into VahanRakshak | Mediator blueprint, VAHAN index endpoint, Inspector suggestions, nav, `setup.py` |
+| 12 | Integrated into VahanRakshak | Mediator blueprint, identifier endpoints on all five services, write-back via each service, Inspector suggestions, dossier cache refresh, `setup.py` |
 | 13 | Contextual attributes | `matching/context.py` (make, model, colour, type) |
 | 14 | Accept / correct / reject / flag rules | `matching/cleansing.py` R1–R9 |
-| 15 | Correct only with sufficient evidence | R7 / R8 only; correction precision 1.0 |
+| 15 | Correct only with sufficient evidence | R7 / R8 only (correction precision 1.0); agency rows updated only for those, VAHAN never auto-edited |
 | 16 | Conflicting & ambiguous records | R3 / R6 (CONFLICT), R5 (AMBIGUOUS) |
 | 17 | Original and corrected registration shown | decision card, Noisy Records, Audit tabs; `v_dq_cleansed_records` |
 | 18 | Vehicle ID, score, reason, status recorded | `dq_plate_corrections` columns |
-| 19 | Preserve original + audit trail | append-only triggers, superseding review rows |
+| 19 | Preserve original + audit trail | append-only triggers, superseding review rows; `dq_agency_corrections` keeps every overwritten value |
 | 20 | Missing / incorrect / conflicting / multiple | 12 labelled scenarios + dedicated tests |
