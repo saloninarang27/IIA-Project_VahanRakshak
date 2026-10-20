@@ -63,6 +63,23 @@ def get_policies_for_vehicle(registration_no):
     resp.headers["Last-Modified"] = last_mod
     return resp
 
+@app.route("/api/v1/identifiers", methods=["GET"])
+def get_identifiers():
+    """Distinct vehicle identifiers held by this agency, used by the Mediator's approximate matcher."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT registration_no AS plate, COUNT(*) AS policies, MAX(policy_expiry_date) AS latest_expiry
+            FROM insurance_policy GROUP BY registration_no ORDER BY registration_no
+            """
+        ).fetchall()
+    return jsonify({
+        "agency": "IIB_IRDAI",
+        "query_key": "registration_no",
+        "count": len(rows),
+        "identifiers": [dict(r) for r in rows]
+    })
+
 @app.route("/api/v1/policies", methods=["POST"])
 def create_policy():
     data = request.get_json(force=True)

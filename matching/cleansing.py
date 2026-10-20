@@ -176,8 +176,16 @@ def assess_record(record: dict, index, method: str = DEFAULT_METHOD,
         # R4
         evidence = (f"; {ctx['matches']} contextual attribute(s) agree" if ctx["matches"]
                     else "; no contextual attributes to cross-check")
+        sources = exact.get("sources")
+        if sources and "VAHAN" not in sources:
+            # The reading is a real plate known to other agencies, but it has no registration record
+            result["flags"].append("NOT_IN_VAHAN")
+            return decide("ACCEPT", "R4", "EXACT_MATCH",
+                          f"{normalized} exists in {', '.join(sources)} but is NOT registered in VAHAN{evidence}.",
+                          match=exact)
+        found = f" (found in {', '.join(sources)})" if sources else ""
         return decide("ACCEPT", "R4", "EXACT_MATCH",
-                      f"{normalized} is a registered plate{evidence}.", match=exact)
+                      f"{normalized} is a registered plate{found}{evidence}.", match=exact)
 
     best = candidates[0]
     runner_up = candidates[1] if len(candidates) > 1 else None

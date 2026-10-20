@@ -19,7 +19,7 @@ REVIEW_ACTIONS = {
 }
 
 _CANDIDATE_FIELDS = ("rank", "vehicle_id", "plate", "make", "model", "color", "vehicle_type",
-                     "plate_score", "scores", "combined_score", "context", "exact")
+                     "plate_score", "scores", "combined_score", "context", "exact", "sources")
 
 
 def _now():
@@ -54,6 +54,12 @@ def reference_index_from_rows(rows):
         "fuel_type": r["fuel_type"],
         "registration_status": r["registration_status"],
     } for r in rows]
+
+
+def load_reference_index_all_sources():
+    """Merged index of plates from the five local agency databases (setup / tests)."""
+    from matching.sources import fetch_source_rows, build_reference_index
+    return build_reference_index(fetch_source_rows(None))
 
 
 def load_reference_index_from_db(vahan_db_path):

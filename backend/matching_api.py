@@ -1,10 +1,11 @@
 """
 Approximate Vehicle Matching & Data Cleansing API (Mediator blueprint, /api/v1/matching).
 
-The reference index of registered vehicles is pulled from the MoRTH VAHAN
-microservice (/api/v1/registry/index) through the Mediator's federated fetcher and
-cached for CACHE_TTL_SECONDS. If VAHAN is unreachable, the local VAHAN replica file
-is used and the response says so.
+The reference index is federated from ALL FIVE agency microservices (VAHAN, IIB,
+Police, ANPR, e-Challan), fetched in parallel through the Mediator's fetcher, merged
+by normalised plate (matching/sources.py) and cached for CACHE_TTL_SECONDS. Each
+candidate records which databases hold it. A service that is unreachable falls back
+to its local replica file, or is reported as unavailable.
 
 Endpoints:
     GET  /config                       methods, thresholds, decision rules, OCR engines
@@ -27,6 +28,7 @@ from flask import Blueprint, jsonify, request
 
 import backend.config as config
 from matching import store
+from matching.sources import fetch_source_rows, build_reference_index, source_summary
 from matching.cleansing import assess_record, RULES, CORRECTION_THRESHOLD, OCR_ONLY_CORRECTION_THRESHOLD, AMBIGUITY_MARGIN
 from matching.context import CONTEXT_ATTRIBUTES
 from matching.evaluation import run_evaluation, evaluate_cleansing
@@ -64,17 +66,13 @@ def get_reference_index(force=False):
         if _index_cache["vehicles"] is not None and fresh and not force:
             return _index_cache["vehicles"]
 
-        vehicles, source = None, None
-        if _fetch is not None:
-            res = _fetch(f"{config.URL_VAHAN}/api/v1/registry/index", "MoRTH VAHAN (Registry Index)")
-            if res["status"] == 200 and res.get("data"):
-                vehicles = store.reference_index_from_rows(res["data"]["vehicles"])
-                source = "VAHAN_API"
-        if vehicles is None and os.path.exists(config.DB_VAHAN):
-            vehicles = store.load_reference_index_from_db(config.DB_VAHAN)
-            source = "LOCAL_VAHAN_REPLICA"
-        if vehicles is None:
-            raise IndexUnavailable("VAHAN registry is unreachable and no local replica exists.")
+        source_rows = fetch_source_rows(_fetch)
+        vehicles = build_reference_index(source_rows)
+        if not vehicles:
+            raise IndexUnavailable("None of the five agency databases is reachable, and no local replica exists.")
+        sources = source_summary(source_rows, vehicles)
+        live = sum(1 for s in sources if s["via"] == "API")
+        source = "ALL_SOURCES_API" if live == len(sources) else f"PARTIAL ({live}/{len(sources)} live)"
 
         _index_cache.update({
             "vehicles": vehicles,
@@ -82,13 +80,14 @@ def get_reference_index(force=False):
             "loaded_at": time.time(),
             "loaded_at_iso": datetime.now().isoformat(sep=" ", timespec="seconds"),
             "source": source,
+            "sources": sources,
         })
         return vehicles
 
 
 def _index_meta():
     return {"size": len(_index_cache["vehicles"] or []), "source": _index_cache["source"],
-            "loaded_at": _index_cache["loaded_at_iso"]}
+            "sources": _index_cache.get("sources") or [], "loaded_at": _index_cache["loaded_at_iso"]}
 
 
 def _db():
@@ -113,7 +112,7 @@ def _record_input(record):
 
 
 def suggest_matches(plate, limit=5):
-    """Used by the vehicle lookup: approximate matches for a plate VAHAN does not know."""
+    """Used by the vehicle lookup: approximate matches for a plate VAHAN does not know (all five databases searched)."""
     assessment = assess_record({"plate": plate}, get_reference_index())
     return {
         "decision": assessment["decision"],
@@ -122,8 +121,8 @@ def suggest_matches(plate, limit=5):
         "corrected_plate": assessment["corrected_plate"],
         "suggested_plate": assessment["suggested_plate"],
         "candidate_count": assessment["candidate_count"],
-        "candidates": [{k: c[k] for k in ("rank", "vehicle_id", "plate", "make", "model", "color",
-                                          "plate_score", "scores")}
+        "candidates": [{k: c.get(k) for k in ("rank", "vehicle_id", "plate", "make", "model", "color",
+                                              "plate_score", "scores", "sources")}
                        for c in assessment["candidates"][:limit]],
     }
 
@@ -235,7 +234,7 @@ def review_record(record_id):
         get_reference_index()
         matched = _index_cache["by_plate"].get(plate)
         if not matched:
-            raise ValueError(f"corrected_plate '{plate}' is not a registered vehicle in VAHAN")
+            raise ValueError(f"corrected_plate '{plate}' is not held by any of the five agency databases")
     try:
         audit_id = store.record_review(_db(), record_id, action, reviewer[:60], body.get("note"),
                                        matched_vehicle=matched)

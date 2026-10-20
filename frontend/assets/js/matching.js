@@ -200,9 +200,11 @@ async function loadConfig() {
     return;
   }
   matchingConfig = data;
-  const src = data.index.source === 'VAHAN_API' ? 'VAHAN API' : 'local VAHAN replica';
-  meta.textContent = `${data.index.size.toLocaleString()} registered vehicles • ${src}`;
-  meta.className = data.index.source === 'VAHAN_API' ? 'badge badge-success' : 'badge badge-warning';
+  const sources = data.index.sources || [];
+  const live = sources.filter(s => s.via === 'API').length;
+  meta.textContent = `${data.index.size.toLocaleString()} plates from ${sources.length} databases • ${live}/${sources.length} live`;
+  meta.title = sources.map(s => `${s.label} (${s.identifier_column}): ${s.plates} plates via ${s.via}${s.error ? ' - ' + s.error : ''}`).join('\n');
+  meta.className = live === sources.length ? 'badge badge-success' : 'badge badge-warning';
 
   const select = document.getElementById('method-select');
   select.innerHTML = data.methods.map(m =>
@@ -518,6 +520,15 @@ function renderDecisionCard(a, opts = {}) {
     </div>`;
 }
 
+const SOURCE_SHORT = { VAHAN: 'VAHAN', IIB: 'IIB', POLICE: 'Police', ANPR: 'ANPR', ECHALLAN: 'Challan' };
+
+// One marker per agency database: filled = this plate exists in that database
+function sourcePills(sources) {
+  const have = new Set(sources || []);
+  return Object.entries(SOURCE_SHORT).map(([key, label]) =>
+    `<span class="src-pill ${have.has(key) ? 'src-yes' : 'src-no'}" title="${label}: ${have.has(key) ? 'plate found' : 'no record'}">${label}</span>`).join('');
+}
+
 function renderCandidateTable(a) {
   if (!a.candidates || !a.candidates.length) {
     return '<div class="empty-note">No registered vehicle within the candidate threshold.</div>';
@@ -527,7 +538,8 @@ function renderCandidateTable(a) {
     <tr>
       <td>${c.rank}</td>
       <td>${renderPlateDiff(a.normalized_plate, c.plate)}${c.exact ? ' <span class="badge badge-success" style="font-size:0.65rem;">exact</span>' : ''}</td>
-      <td class="mono">${c.vehicle_id}</td>
+      <td class="mono">${c.vehicle_id ?? '—'}</td>
+      <td class="src-cell">${sourcePills(c.sources)}</td>
       <td style="font-size:0.82rem;">${esc(c.make)} ${esc(c.model)}<br><span style="color:var(--text-muted);">${esc(c.color)} • ${esc(c.vehicle_type)}</span></td>
       <td>${contextPills(c.context)}</td>
       <td>${scoreCell(c.combined_score)}</td>
@@ -545,11 +557,12 @@ function renderCandidateTable(a) {
       <span class="plate-text"><span class="ch-edit">red</span></span> = substitution,
       <span class="plate-text"><span class="ch-ins">blue</span></span> = insertion.
       Combined = 65% plate similarity + 35% contextual agreement when attributes are observed.
+      Candidates are drawn from all five agency databases; <em>Found in</em> shows which ones hold each plate.
     </div>
     <div class="table-container">
       <table class="data-table">
         <thead><tr>
-          <th>#</th><th>Registered plate</th><th>Vehicle ID</th><th>Vehicle</th><th>Context</th><th>Combined</th>
+          <th>#</th><th>Plate</th><th>Vehicle ID</th><th>Found in</th><th>Vehicle</th><th>Context</th><th>Combined</th>
           <th>OCR-wtd</th><th>Levenshtein</th><th>Jaro–W.</th><th>Hybrid</th><th></th>
         </tr></thead>
         <tbody>${rows}</tbody>

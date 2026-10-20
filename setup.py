@@ -51,7 +51,7 @@ def main():
         if os.path.exists(bc.DB_DATA_QUALITY + suffix):
             os.remove(bc.DB_DATA_QUALITY + suffix)
     store.init_store(bc.DB_DATA_QUALITY)
-    index = store.load_reference_index_from_db(bc.DB_VAHAN)
+    index = store.load_reference_index_all_sources()
     staged = store.seed_noisy_records(bc.DB_DATA_QUALITY, index)
     report = run_evaluation([v["plate"] for v in index])
     report["cleansing"] = evaluate_cleansing(store.list_noisy_records(bc.DB_DATA_QUALITY), index)

@@ -131,6 +131,11 @@
 .score-bar > span { display: block; height: 100%; background: var(--accent-primary); border-radius: 3px; }
 .score-num { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary); }
 
+.src-cell { white-space: nowrap; }
+.src-pill { display: inline-block; font-size: 0.66rem; font-weight: 600; padding: 0.08rem 0.32rem; border-radius: 4px; margin: 0.08rem 0.12rem 0.08rem 0; }
+.src-yes { background: var(--status-info-bg); color: var(--status-info-text); }
+.src-no { background: var(--bg-muted); color: var(--text-muted); text-decoration: line-through; opacity: 0.7; }
+
 .ctx-pill { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 4px; margin: 0.1rem 0.15rem 0.1rem 0; }
 .ctx-MATCH { background: var(--status-success-bg); color: var(--status-success-text); }
 .ctx-MISMATCH { background: var(--status-danger-bg); color: var(--status-danger-text); }

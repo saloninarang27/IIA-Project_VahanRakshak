@@ -63,6 +63,24 @@ def get_captures_for_plate(plate_number):
     resp.headers["Last-Modified"] = last_mod
     return resp
 
+@app.route("/api/v1/identifiers", methods=["GET"])
+def get_identifiers():
+    """Distinct vehicle identifiers held by this agency, used by the Mediator's approximate matcher."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT plate_number AS plate, COUNT(*) AS sightings, MAX(captured_timestamp) AS last_seen,
+                   detected_make, detected_model, detected_color, vehicle_type
+            FROM vehicle_capture GROUP BY plate_number ORDER BY plate_number
+            """
+        ).fetchall()
+    return jsonify({
+        "agency": "TRAFFIC_ANPR",
+        "query_key": "plate_number",
+        "count": len(rows),
+        "identifiers": [dict(r) for r in rows]
+    })
+
 @app.route("/api/v1/captures", methods=["GET"])
 def list_captures():
     page = int(request.args.get("page", 1))

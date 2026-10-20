@@ -94,6 +94,23 @@ def get_challans_for_vehicle(vehicle_identifier):
     resp.headers["Last-Modified"] = last_mod
     return resp
 
+@app.route("/api/v1/identifiers", methods=["GET"])
+def get_identifiers():
+    """Distinct vehicle identifiers held by this agency, used by the Mediator's approximate matcher."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT vehicle_identifier AS plate, COUNT(*) AS challans
+            FROM ministry_report GROUP BY vehicle_identifier ORDER BY vehicle_identifier
+            """
+        ).fetchall()
+    return jsonify({
+        "agency": "MORTH_ECHALLAN",
+        "query_key": "vehicle_identifier",
+        "count": len(rows),
+        "identifiers": [dict(r) for r in rows]
+    })
+
 @app.route("/api/v1/challans", methods=["POST"])
 def issue_challan():
     data = request.get_json(force=True)

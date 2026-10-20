@@ -74,6 +74,23 @@ def get_theft_scrap_record(vehicle_no):
     resp.headers["Last-Modified"] = last_mod
     return resp
 
+@app.route("/api/v1/identifiers", methods=["GET"])
+def get_identifiers():
+    """Distinct vehicle identifiers held by this agency, used by the Mediator's approximate matcher."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT vehicle_no AS plate, theft_status, scrapping_status
+            FROM theft_scrap_record GROUP BY vehicle_no ORDER BY vehicle_no
+            """
+        ).fetchall()
+    return jsonify({
+        "agency": "POLICE_CCTNS",
+        "query_key": "vehicle_no",
+        "count": len(rows),
+        "identifiers": [dict(r) for r in rows]
+    })
+
 @app.route("/api/v1/theft", methods=["POST"])
 def report_theft():
     data = request.get_json(force=True)
