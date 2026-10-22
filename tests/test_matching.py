@@ -382,3 +382,48 @@ def test_vehicle_lookup_suggests_matches_for_unregistered_plate(api):
 
     registered = api.get("/api/v1/vehicles/DL01AB1001?force_sync=true").get_json()
     assert registered["approximate_matches"] is None
+
+
+def test_candidate_threshold_is_inclusive(index):
+    # DL01AB2346 is exactly two edits from the reading (similarity 0.80): it must be listed
+    plates = {c["plate"] for c in find_candidates("DL1AB2345", index, threshold=0.80)}
+    assert {"DL01AB2345", "DL01AB2346"} <= plates
+    assert ocr_similarity("DL1AB2345", "DL01AB2346", 0.80) == pytest.approx(0.80)
+
+
+# ---------------------------------------------------------------------------
+# Score breakdown shown in the UI ("How the combined score was calculated")
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("record", [
+    {"plate": "DL 1A B2345"},
+    {"plate": "DL 1A B2345", "make": "Volkswagen", "model": "Polo", "color": "Black"},
+    {"plate": "DLO1A8I0O4"},
+    {"plate": "DL01AB1010", "make": "Toyota"},
+    {"plate": "DL01AB12340", "color": "Silver"},
+    {"plate": "DL01AB1001"},
+])
+def test_score_breakdown_agrees_with_the_scores(index, record):
+    from matching.similarity import ocr_weighted_distance
+    a = assess_record(record, index)
+    assert a["score_breakdown"] is not None
+    for c in a["candidates"]:
+        b = c["breakdown"]
+        edits = b["methods"]["ocr_weighted"]["edits"]
+        assert sum(e["cost"] for e in edits) == pytest.approx(ocr_weighted_distance(a["normalized_plate"], c["plate"]))
+        for method in METHODS:
+            assert b["methods"][method]["value"] == pytest.approx(c["scores"][method], abs=1e-3)
+        assert b["plate_similarity"]["value"] == c["plate_score"]
+        if b["context"]:
+            expected = 0.65 * c["plate_score"] + 0.35 * b["context"]["value"]
+        else:
+            expected = c["plate_score"]
+        assert b["combined"]["value"] == pytest.approx(expected, abs=1e-3) == pytest.approx(c["combined_score"], abs=1e-3)
+
+
+def test_score_breakdown_explains_the_dl1ab2345_example(index):
+    b = assess_record({"plate": "DL 1A B2345"}, index)["score_breakdown"]
+    edits = b["plate_similarity"]["edits"]
+    assert [(e["to"], e["kind"], e["cost"]) for e in edits] == [("0", "missing character", 1.0)]
+    assert b["plate_similarity"]["formula"] == "1 − 1 ÷ 10 = 0.900"
+    assert b["context"] is None and "combined = plate similarity = 0.900" in b["combined"]["formula"]
+    assert "2 × 0.1" in b["methods"]["jaro_winkler"]["formula"] and b["methods"]["jaro_winkler"]["value"] == 0.9733

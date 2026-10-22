@@ -6,7 +6,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![Flask Microservices](https://img.shields.io/badge/architecture-Microservices%20Federation-orange.svg)](docs/architecture.md)
-[![Tests Passing](https://img.shields.io/badge/tests-116%2F116%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/tests-122%2F122%20Passing-brightgreen.svg)](tests/)
 [![Validation](https://img.shields.io/badge/validation-18%2F18%20Checks%20Passed-success.svg)](scripts/validate_project.py)
 [![Evaluation Rubric](https://img.shields.io/badge/rubric%20score-15%2F15%20Marks-gold.svg)](#-project-a-evaluation-rubric-traceability-1515-marks)
 
@@ -106,6 +106,7 @@ Full write-up, results and requirement traceability: [`docs/approximate_matching
 - **Cleansing rules R1–R9:** make, model, colour and type decide **ACCEPT / CORRECT / REJECT / REVIEW**. Corrections need confirming context or a pure, unambiguous OCR-glyph swap; conflicting and ambiguous records are flagged. On 112 labelled records covering missing information, incorrect plates, conflicting details and multiple matches, the engine agrees with every label, and its 42 automatic corrections are all correct.
 - **Cleansing the live agency data (🗄️ Agency Data tab):** scans all five agency databases through their own services for noisy identifiers (misreads, typos, formatting, unregistered plates, suspicious registry entries), applies the same rules using the row's own make/model/colour or a camera sighting of the same reading, and **writes corrections back** to the agency database. Uncertain rows go to a reviewer, unregistered plates are flagged, nothing is deleted, and VAHAN is never auto-edited. Inserts, updates and deletes made in the SQL REPL are picked up immediately.
 - **Audit:** the original records and an append-only correction audit trail (vehicle ID, similarity, reason, status, reviewer) are protected by SQLite triggers. Reviewer decisions supersede rule-engine rows and are never overwritten.
+- **Cleansing with the scanned image as evidence:** after a photo resolves to one registered vehicle, the recorded rows that refer to it under a noisy identifier are corrected using the photo: rows holding the same misreading, or rows without vehicle details, re-decided with the make / model / colour seen in the photo. A row whose own camera attributes contradict the photo keeps its own decision. Preview first, then apply.
 - **Audit of agency changes:** every value written back is logged in `dq_agency_corrections` with the original value, row, rule and reason (append-only).
 - **Integrated:** a Mediator blueprint (`/api/v1/matching/*`), identifier endpoints on all five services, write-back through each service, dossier-cache refresh after a correction, and "did you mean" suggestions in the Vehicle Inspector for unregistered plates.
 
@@ -175,10 +176,10 @@ Test these pre-seeded vehicle plates directly in the Vehicle Search or Inspector
 
 ## 📊 Verification & Automated Test Suite
 
-VehicleSentinel includes a 100% passing automated test suite with **116 tests**: 49 validating the original evaluation rubric, 63 covering approximate matching, OCR and data cleansing ([`test_matching.py`](tests/test_matching.py), [`test_plate_ocr.py`](tests/test_plate_ocr.py), [`test_matching_sources.py`](tests/test_matching_sources.py), [`test_agency_cleansing.py`](tests/test_agency_cleansing.py)) and 4 for the e-Challan webhook:
+VehicleSentinel includes a 100% passing automated test suite with **122 tests**: 49 validating the original evaluation rubric, 69 covering approximate matching, OCR and data cleansing ([`test_matching.py`](tests/test_matching.py), [`test_plate_ocr.py`](tests/test_plate_ocr.py), [`test_matching_sources.py`](tests/test_matching_sources.py), [`test_agency_cleansing.py`](tests/test_agency_cleansing.py), [`test_image_cleansing.py`](tests/test_image_cleansing.py)) and 4 for the e-Challan webhook:
 
 ```bash
-# Run the complete test suite (116/116 passing)
+# Run the complete test suite (122/122 passing)
 pytest -v
 
 # Run the strict 18-point data and schema integrity validation

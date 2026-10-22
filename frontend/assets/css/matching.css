@@ -199,3 +199,28 @@
   border-top-color: var(--accent-primary); border-radius: 50%; animation: mspin 0.8s linear infinite; vertical-align: -2px;
 }
 @keyframes mspin { to { transform: rotate(360deg); } }
+
+/* Score breakdown ("How the combined score was calculated") */
+.calc-box { margin-top: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-muted); padding: 0.75rem 1rem; }
+.calc-box > summary { cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--text-primary); }
+.calc-box[open] > summary { margin-bottom: 0.6rem; }
+.calc-inline { margin: 0.25rem 0; background: var(--bg-surface); }
+.calc-inline-title { font-weight: 700; font-size: 0.88rem; margin-bottom: 0.4rem; }
+.calc-step { padding: 0.55rem 0; border-top: 1px dashed var(--border-medium); }
+.calc-step:first-of-type { border-top: none; }
+.calc-step-title { font-size: 0.86rem; color: var(--text-secondary); margin-bottom: 0.35rem; }
+.calc-step-title strong { color: var(--text-primary); }
+.calc-formula { font-family: var(--font-mono); font-size: 0.85rem; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; margin: 0.35rem 0; overflow-x: auto; white-space: nowrap; }
+.calc-formula-inline { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-secondary); }
+.calc-note { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
+.calc-muted { color: var(--text-muted); font-style: italic; }
+.calc-table { border-collapse: collapse; font-size: 0.8rem; margin: 0.2rem 0 0.3rem; }
+.calc-table th, .calc-table td { text-align: left; padding: 0.25rem 0.7rem 0.25rem 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.calc-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 600; }
+.calc-table tr.calc-total td { font-weight: 700; border-bottom: none; }
+.calc-table .swatch { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.calc-toggle { display: block; margin-top: 0.25rem; background: none; border: none; padding: 0; font: inherit; font-size: 0.72rem;
+  color: var(--accent-primary); cursor: pointer; }
+.calc-toggle:hover { text-decoration: underline; }
+.data-table tr.calc-row td { background: var(--bg-muted); }

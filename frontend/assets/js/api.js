@@ -114,6 +114,8 @@ const API = {
 
   cleanseAgencyData() { return this._matching('/agency/cleanse', this._json('POST', {})); },
 
+  imageCleanse(payload) { return this._matching('/agency/image-cleanse', this._json('POST', payload)); },
+
   reviewAgencyRow(payload) { return this._matching('/agency/review', this._json('POST', payload)); },
 
   getAgencyChanges(params = {}) {

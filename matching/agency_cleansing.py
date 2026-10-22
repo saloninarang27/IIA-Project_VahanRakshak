@@ -95,7 +95,7 @@ def _context(source, row):
 def _slim(assessment):
     keep = ("decision", "decision_status", "rule", "reason_code", "reason", "flags", "normalized_plate",
             "corrected_plate", "suggested_plate", "matched_vehicle_id", "matched_plate", "similarity_score",
-            "context_score", "combined_score", "candidate_count", "edits", "format_valid")
+            "context_score", "combined_score", "candidate_count", "edits", "format_valid", "score_breakdown")
     out = {k: assessment.get(k) for k in keep}
     out["candidates"] = [{k: c.get(k) for k in ("rank", "vehicle_id", "plate", "make", "model", "color",
                                                  "vehicle_type", "plate_score", "combined_score", "context")}
@@ -199,6 +199,84 @@ def scan(vahan_index, sql_runner=http_sql_runner, method=DEFAULT_METHOD, sources
             })
 
     return {"anomalies": anomalies, "sources": summary}
+
+
+# ---------------------------------------------------------------------------
+# Cleansing with a scanned image as evidence
+# ---------------------------------------------------------------------------
+def scan_with_image(scan_record, vahan_index, sql_runner=http_sql_runner, method=DEFAULT_METHOD, image_name=None):
+    """
+    Use a scanned plate image (its OCR reading, plus the make / model / colour / type
+    the operator observes in the photo) as evidence to cleanse the recorded rows that
+    refer to the photographed vehicle.
+
+    1. The scan itself goes through the rule engine. Only a scan that resolves to ONE
+       registered vehicle P (ACCEPT or CORRECT) is used as evidence.
+    2. Recorded rows in IIB / Police / ANPR / e-Challan whose identifier is noisy and
+       either IS the scanned reading or has P among its candidates are re-decided:
+         - row has its own attributes (ANPR, or an ANPR sighting of the same reading)
+           -> it keeps its own decision: that is better evidence about the row
+         - same reading as the photo         -> correct to P (the image shows what it is)
+         - otherwise the rule engine is re-run with the attributes seen in the image;
+           corrected only if that gives CORRECT -> P
+       VAHAN is never auto-edited.
+    Returns {"scan": assessment, "vehicle": plate or None, "related": [anomalies]}.
+    """
+    image_context = {attr: (scan_record.get(attr) or None) for attr in ("make", "model", "color", "vehicle_type")}
+    scan_assessment = assess_record({"plate": scan_record.get("plate"), **image_context}, vahan_index, method)
+    vehicle = None
+    if scan_assessment["decision"] == "CORRECT":
+        vehicle = scan_assessment["corrected_plate"]
+    elif scan_assessment["decision"] == "ACCEPT":
+        vehicle = scan_assessment["matched_plate"]
+    result = {"scan": _slim(scan_assessment), "vehicle": vehicle, "related": [], "sources": []}
+    if not vehicle:
+        return result
+
+    reading = scan_assessment["normalized_plate"]
+    evidence = f"scanned image{f' {image_name}' if image_name else ''}"
+    found = scan(vahan_index, sql_runner, method)
+    result["sources"] = found["sources"]
+    for a in found["anomalies"]:
+        if a["source"] == "VAHAN" or a["kind"] == "MISSING_IDENTIFIER":
+            continue
+        s = a["assessment"]
+        norm = normalize_plate(a["original_value"])
+        about_vehicle = {c["plate"] for c in s.get("candidates") or []} | {
+            s.get("matched_plate"), s.get("suggested_plate"), s.get("corrected_plate")}
+        if norm != reading and vehicle not in about_vehicle:
+            continue                              # a noisy row, but about some other vehicle
+
+        if a["action"] == "UPDATE":
+            a["image_evidence"] = "already sufficient"
+        elif a["context_from"]:
+            a["image_evidence"] = f"kept: the row has its own evidence ({a['context_from']})"
+        elif norm == reading:
+            a.update({"action": "UPDATE", "new_value": vehicle, "context_from": evidence,
+                      "image_evidence": "same reading as the photo"})
+            a["assessment"] = {**s, "decision": "CORRECT", "decision_status": "CORRECTED",
+                               "corrected_plate": vehicle, "matched_plate": vehicle,
+                               "matched_vehicle_id": scan_assessment["matched_vehicle_id"],
+                               "similarity_score": scan_assessment["similarity_score"],
+                               "context_score": scan_assessment["context_score"],
+                               "rule": "IMG1", "reason_code": "SCANNED_IMAGE_SAME_READING",
+                               "reason": (f"The photographed plate reads '{reading}' too and resolves to {vehicle} "
+                                          f"({scan_assessment['rule']}: {scan_assessment['reason']})")}
+        elif any(image_context.values()):
+            redo = assess_record({"plate": a["original_value"], **image_context}, vahan_index, method)
+            if redo["decision"] == "CORRECT" and redo["corrected_plate"] == vehicle:
+                slim = _slim(redo)
+                slim["rule"] = f"IMG2/{redo['rule']}"
+                slim["reason"] = f"Using the vehicle attributes seen in the {evidence}: " + redo["reason"]
+                a.update({"action": "UPDATE", "new_value": vehicle, "context": image_context,
+                          "context_from": evidence, "assessment": slim,
+                          "image_evidence": "attributes seen in the photo"})
+            else:
+                a["image_evidence"] = f"not enough even with the photo ({redo['rule']} {redo['reason_code']})"
+        else:
+            a["image_evidence"] = "kept: no attributes were entered for the photo"
+        result["related"].append(a)
+    return result
 
 
 # ---------------------------------------------------------------------------

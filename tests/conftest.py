@@ -10,6 +10,13 @@ end-to-end pipeline smoke test.
 import sys
 import os
 
+# The suite always tests this checkout's own services in-process. A .env pointing at
+# another laptop (REMOTE_HOST / HOST_*) must not leak in, or the tests would depend on
+# that machine being reachable. Empty values win over .env (it never overrides set vars).
+for _var in ("SERVICES_HOST", "REMOTE_HOST", "HOST_IIB", "HOST_VAHAN", "HOST_POLICE", "HOST_ANPR",
+             "HOST_ECHALLAN", "URL_IIB", "URL_VAHAN", "URL_POLICE", "URL_ANPR", "URL_ECHALLAN"):
+    os.environ[_var] = ""
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest

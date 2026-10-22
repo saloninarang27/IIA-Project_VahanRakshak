@@ -18,7 +18,15 @@ mistyped by an insurer, or entered with spaces and hyphens. It does two jobs.
 | Agency-data cleansing | [`matching/agency_cleansing.py`](../matching/agency_cleansing.py) → 🗄️ Agency Data tab |
 | Staging + audit schema | [`schemas/data_quality_schema.sql`](../schemas/data_quality_schema.sql) → `backend/dwh/data_quality.db` |
 | UI | [`frontend/pages/matching.html`](../frontend/pages/matching.html) (🧩 Plate Matching), plus "did you mean" in the Vehicle Inspector |
-| Tests | [`test_matching.py`](../tests/test_matching.py) (31), [`test_plate_ocr.py`](../tests/test_plate_ocr.py) (15), [`test_matching_sources.py`](../tests/test_matching_sources.py) (5), [`test_agency_cleansing.py`](../tests/test_agency_cleansing.py) (12) |
+| Tests | [`test_matching.py`](../tests/test_matching.py) (31), [`test_plate_ocr.py`](../tests/test_plate_ocr.py) (15), [`test_matching_sources.py`](../tests/test_matching_sources.py) (5), [`test_agency_cleansing.py`](../tests/test_agency_cleansing.py) (12), [`test_image_cleansing.py`](../tests/test_image_cleansing.py) (6) |
+
+### Evaluation rubric → where to look
+
+| Rubric item | What to show | Where |
+|---|---|---|
+| **1. Scanned image → all approximately matching vehicles, and vice-versa; best algorithm, justified (5)** | Upload a photo on **📷 Scan & Match**: every plausible vehicle from all five databases, ranked with all four scores. Vice-versa: **🗄️ Agency Data** / **🧹 Noisy Records** take each noisy recorded plate to its candidate vehicles, and a clean scan also lists the noisy recorded plates near it ("Found in"). Justification: **📊 Algorithm Evaluation** (P / R / F1). | [Algorithm comparison](#algorithm-comparison-items-6-10-11) |
+| **2. Cleanse the recorded data w.r.t. the image and contextual data, no anomalies left (5)** | Scan the photo, enter the make / model / colour seen in it, then **Cleanse recorded data with this scan**: rows recorded under a noisy identifier are corrected in their agency database. **🗄️ Agency Data → Apply** cleanses everything else; a rescan shows 0 anomalies. | [Cleansing with the scanned image](#cleansing-with-the-scanned-image-as-evidence), [live agency data](#cleansing-the-live-agency-databases-rubric-2) |
+| **3. Prompts, generated code, our changes (5)** | Prompt-by-prompt log with the commits each prompt produced, and the `git diff` commands that highlight changes. | [`docs/vibe_coding_log.md`](vibe_coding_log.md) |
 
 ## Pipeline
 
@@ -216,7 +224,38 @@ for changes made any other way, or click **↻ Refresh plate list**).
 | target **VAHAN**: insert `DL01AB1O05` with the same make/model/colour as `DL01AB1005` | Scan | *Suspicious registry entry* → review; VAHAN is not auto-edited |
 | any row to **Review** | Review → Correct | the chosen registered plate is written to that agency table |
 
+| target **IIB**: insert a policy for `DL01AB12340` (typo, no vehicle details) | Scan shows **Review** (ambiguous). Then 📷 Scan & Match: upload `plate_skewed_DL01AB1234.png`, enter Renault / Kwid / Silver / SUV → **Cleanse recorded data with this scan** → Apply | corrected to `DL01AB1234` using the photo (rule `IMG2/R7`); rescan shows 0 anomalies |
+
 `python setup.py` restores the original data afterwards.
+
+### Cleansing with the scanned image as evidence
+
+The rubric asks to cleanse the recorded data **with respect to the image** and other contextual data. After a scan,
+the **Cleanse recorded data with this scan** panel (`POST /api/v1/matching/agency/image-cleanse`,
+`scan_with_image` in [`agency_cleansing.py`](../matching/agency_cleansing.py)) does this:
+
+1. **Resolve the photo.** The OCR reading plus the make / model / colour / type the operator sees in the photo go
+   through rules R1–R9. Only a scan that resolves to **one** registered vehicle *P* (ACCEPT or CORRECT) is used as
+   evidence. An ambiguous or unregistered scan changes nothing.
+2. **Find the recorded rows about *P*.** These are rows in IIB, Police, ANPR and e-Challan whose identifier is noisy
+   and either *is* the scanned reading or has *P* among its candidates. Noisy rows about other vehicles are not touched.
+3. **Re-decide each row with the photo as evidence:**
+
+   | Row | Decision | Rule |
+   |---|---|---|
+   | Already correctable on its own evidence | corrected as before | R7 / R8 |
+   | Has its own attributes (ANPR, or an ANPR sighting of the same reading) | **keeps its own decision**: a camera that saw a different car beats the photo | — |
+   | Holds the same misreading as the photo | corrected to *P* (the photo shows what that string is) | `IMG1` |
+   | No attributes of its own | the same rule engine re-run with the photo's attributes; corrected only if that gives CORRECT → *P* | `IMG2/R7` |
+
+4. **Preview, then apply.** The preview writes nothing. **Apply** uses the same write-back and append-only change log
+   as the Agency Data tab, with `context_from = "scanned image <file>"`. VAHAN is never edited automatically.
+
+Measured live, over HTTP against the running services: an IIB policy inserted as `DL01AB12340` stays in review on its
+own (R5, ambiguous: no vehicle details). The skewed sample photo reads `DL 01 AB 1234` (RapidOCR, confidence 0.94).
+With the attributes seen in the photo (silver Renault Kwid SUV), the row is corrected to `DL01AB1234` (`IMG2/R7`).
+The REPL shows the new value, the change log keeps `DL01AB12340`, a rescan reports 0 anomalies, and the vehicle's
+dossier now lists the policy.
 
 ## Audit trail & original-data preservation (items 17–19)
 
@@ -251,6 +290,7 @@ for changes made any other way, or click **↻ Refresh plate list**).
 | POST | `/api/v1/matching/agency/cleanse` | apply: write corrections back, flag / queue the rest |
 | POST | `/api/v1/matching/agency/review` | `{source, row_id, original_value, action, corrected_plate?, reviewer, note?}` |
 | GET | `/api/v1/matching/agency/changes` | append-only log of agency-data decisions |
+| POST | `/api/v1/matching/agency/image-cleanse` | `{plate, make?, model?, color?, vehicle_type?, image_name?, apply?}` → the scan's vehicle and the recorded rows about it, re-decided with the photo as evidence; `apply: true` writes back |
 
 `GET /api/v1/vehicles/<plate>` also returns `approximate_matches` when VAHAN has no record of the plate. The Vehicle
 Inspector shows these as "did you mean" suggestions.
@@ -308,3 +348,4 @@ one-click alternatives. The raw text, engine and confidence are logged, and the 
 | 18 | Vehicle ID, score, reason, status recorded | `dq_plate_corrections` columns |
 | 19 | Preserve original + audit trail | append-only triggers, superseding review rows; `dq_agency_corrections` keeps every overwritten value |
 | 20 | Missing / incorrect / conflicting / multiple | 12 labelled scenarios + dedicated tests |
+| R2 | Cleanse recorded data w.r.t. the image | `scan_with_image` + "Cleanse recorded data with this scan" panel; `tests/test_image_cleansing.py` |

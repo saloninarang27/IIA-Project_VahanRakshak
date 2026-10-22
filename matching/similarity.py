@@ -22,7 +22,15 @@ def jaro(s1: str, s2: str) -> float:
     len1, len2 = len(s1), len(s2)
     if len1 == 0 or len2 == 0:
         return 0.0
+    matches, transpositions = jaro_counts(s1, s2)
+    if matches == 0:
+        return 0.0
+    return (matches / len1 + matches / len2 + (matches - transpositions) / matches) / 3.0
 
+
+def jaro_counts(s1: str, s2: str):
+    """(matching characters, transpositions) as defined by Jaro: matches within the window."""
+    len1, len2 = len(s1), len(s2)
     match_window = max(max(len1, len2) // 2 - 1, 0)
     s1_matched = [False] * len1
     s2_matched = [False] * len2
@@ -37,7 +45,7 @@ def jaro(s1: str, s2: str) -> float:
                 matches += 1
                 break
     if matches == 0:
-        return 0.0
+        return 0, 0
 
     # Count half-transpositions: matched characters that appear in a different order
     transpositions = 0
@@ -49,9 +57,16 @@ def jaro(s1: str, s2: str) -> float:
             if s1[i] != s2[k]:
                 transpositions += 1
             k += 1
-    transpositions //= 2
+    return matches, transpositions // 2
 
-    return (matches / len1 + matches / len2 + (matches - transpositions) / matches) / 3.0
+
+def common_prefix(s1: str, s2: str, max_prefix: int = 4) -> int:
+    prefix = 0
+    for a, b in zip(s1[:max_prefix], s2[:max_prefix]):
+        if a != b:
+            break
+        prefix += 1
+    return prefix
 
 
 def jaro_winkler(s1: str, s2: str, prefix_scale: float = 0.1, max_prefix: int = 4,
@@ -60,12 +75,7 @@ def jaro_winkler(s1: str, s2: str, prefix_scale: float = 0.1, max_prefix: int = 
     j = jaro(s1, s2)
     if j <= boost_threshold:
         return j
-    prefix = 0
-    for a, b in zip(s1[:max_prefix], s2[:max_prefix]):
-        if a != b:
-            break
-        prefix += 1
-    return j + prefix * prefix_scale * (1.0 - j)
+    return j + common_prefix(s1, s2, max_prefix) * prefix_scale * (1.0 - j)
 
 
 # ---------------------------------------------------------------------------
@@ -186,8 +196,59 @@ def ocr_similarity(s1: str, s2: str, min_similarity: float = None) -> float:
     longest = max(len(s1), len(s2))
     if longest == 0:
         return 1.0
-    max_distance = None if min_similarity is None else (1.0 - min_similarity) * longest
+    # + 1e-9: (1 - 0.80) * 10 is 1.9999999999999996 in floating point, which would wrongly
+    # cut off a plate exactly two edits away (similarity exactly 0.80, threshold inclusive)
+    max_distance = None if min_similarity is None else (1.0 - min_similarity) * longest + 1e-9
     return max(0.0, 1.0 - ocr_weighted_distance(s1, s2, max_distance) / longest)
+
+
+def ocr_alignment(reading: str, plate: str):
+    """
+    The cheapest edit sequence behind ocr_weighted_distance(reading, plate), for display.
+    Each edit: {"op": substitute | insert | delete | transpose, "position", "from", "to", "cost"}.
+    "insert" = a character the reading is missing; "delete" = an extra character in the reading.
+    The costs add up to ocr_weighted_distance(reading, plate).
+    """
+    n, m = len(reading), len(plate)
+    dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = float(i)
+    for j in range(m + 1):
+        dp[0][j] = float(j)
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            best = min(dp[i - 1][j] + 1.0, dp[i][j - 1] + 1.0,
+                       dp[i - 1][j - 1] + substitution_cost(reading[i - 1], plate[j - 1]))
+            if (i > 1 and j > 1 and reading[i - 1] != plate[j - 1]
+                    and reading[i - 1] == plate[j - 2] and reading[i - 2] == plate[j - 1]):
+                best = min(best, dp[i - 2][j - 2] + 1.0)
+            dp[i][j] = best
+
+    edits, i, j = [], n, m
+    close = lambda a, b: abs(a - b) < 1e-9
+    while i > 0 or j > 0:
+        if i > 0 and j > 0:
+            cost = substitution_cost(reading[i - 1], plate[j - 1])
+            if close(dp[i][j], dp[i - 1][j - 1] + cost):
+                if cost:
+                    edits.append({"op": "substitute", "position": i - 1, "from": reading[i - 1],
+                                  "to": plate[j - 1], "cost": cost})
+                i, j = i - 1, j - 1
+                continue
+            if (i > 1 and j > 1 and reading[i - 1] == plate[j - 2] and reading[i - 2] == plate[j - 1]
+                    and close(dp[i][j], dp[i - 2][j - 2] + 1.0)):
+                edits.append({"op": "transpose", "position": i - 2, "from": reading[i - 2:i],
+                              "to": plate[j - 2:j], "cost": 1.0})
+                i, j = i - 2, j - 2
+                continue
+        if i > 0 and close(dp[i][j], dp[i - 1][j] + 1.0):
+            edits.append({"op": "delete", "position": i - 1, "from": reading[i - 1], "to": "", "cost": 1.0})
+            i -= 1
+        else:
+            edits.append({"op": "insert", "position": i, "from": "", "to": plate[j - 1], "cost": 1.0})
+            j -= 1
+    edits.reverse()
+    return edits
 
 
 HYBRID_OCR_WEIGHT = 0.8

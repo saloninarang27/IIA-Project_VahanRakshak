@@ -26,6 +26,7 @@ from matching.normalize import normalize_plate, is_valid_plate_format, MIN_PLATE
 from matching.matcher import find_candidates, DEFAULT_METHOD, DEFAULT_CANDIDATE_THRESHOLD
 from matching.context import compare_context, has_context, CONTEXT_ATTRIBUTES
 from matching.similarity import explain_edits
+from matching.explain import score_breakdown
 
 CORRECTION_THRESHOLD = 0.85
 OCR_ONLY_CORRECTION_THRESHOLD = 0.90
@@ -105,7 +106,13 @@ def assess_record(record: dict, index, method: str = DEFAULT_METHOD,
         "edits": [],
         "candidate_count": 0,
         "candidates": [],
+        "score_breakdown": None,
     }
+
+    def with_breakdown(c):
+        if "breakdown" not in c:
+            c["breakdown"] = score_breakdown(normalized, c, method, PLATE_WEIGHT, CONTEXT_WEIGHT)
+        return c["breakdown"]
 
     def decide(decision, rule, reason_code, reason, match=None, corrected=None, suggested=None):
         result.update({
@@ -125,6 +132,7 @@ def assess_record(record: dict, index, method: str = DEFAULT_METHOD,
                 "context_score": match["context"]["score"],
                 "combined_score": match["combined_score"],
                 "edits": explain_edits(normalized, match["plate"]),
+                "score_breakdown": with_breakdown(match),
             })
         return result
 
@@ -150,6 +158,8 @@ def assess_record(record: dict, index, method: str = DEFAULT_METHOD,
         c["rank"] = rank
     result["candidate_count"] = len(candidates)
     result["candidates"] = candidates[:max_candidates]
+    for c in result["candidates"]:
+        with_breakdown(c)
 
     # R2 - nothing plausible
     if not candidates:

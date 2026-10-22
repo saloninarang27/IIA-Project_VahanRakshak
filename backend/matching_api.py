@@ -404,6 +404,30 @@ def agency_cleanse():
                     "duration_ms": round((time.time() - started) * 1000, 1)})
 
 
+@matching_bp.route("/agency/image-cleanse", methods=["POST"])
+def agency_image_cleanse():
+    """
+    Cleanse the recorded rows that refer to a scanned vehicle, using the scan (OCR
+    reading + attributes seen in the photo) as evidence. apply=false previews.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    method = _method_arg(body.get("method"))
+    started = time.time()
+    scan_record = {"plate": body.get("plate"), **{a: (body.get(a) or None) for a, _ in CONTEXT_ATTRIBUTES}}
+    result = agency_cleansing.scan_with_image(scan_record, _vahan_index(), _sql_runner, method,
+                                              image_name=(body.get("image_name") or None))
+    related = _annotate(result["related"])
+    response = {"status": "success", "method": method, "scan": result["scan"], "vehicle": result["vehicle"],
+                "related": related, "sources": result["sources"], "applied": None}
+    if body.get("apply") and related:
+        open_rows = [a for a in related if not a["resolved"]]
+        applied = agency_cleansing.apply(open_rows, _store_conn, _sql_runner)
+        _data_changed(applied["changed_plates"] + [a["original_value"] for a in open_rows if a["action"] == "UPDATE"])
+        response["applied"] = applied
+    response["duration_ms"] = round((time.time() - started) * 1000, 1)
+    return jsonify(response)
+
+
 @matching_bp.route("/agency/review", methods=["POST"])
 def agency_review():
     body = request.get_json(force=True, silent=True) or {}

@@ -106,6 +106,41 @@ then "complete all the tasks".
 ✍️ **Our changes:**
 - …
 
+### Step 5: Cleansing with the scanned image as evidence, hermetic tests
+
+**Prompt:** "complete if something missing", with the evaluation rubric pasted (1. image → approximate matches
+and vice-versa with a justified algorithm; 2. cleanse the recorded data w.r.t. the image data and contextual
+information; 3. prompts, generated code and our changes).
+
+**Gaps found by checking the code against the rubric:**
+- Rubric 2 says "w.r.t. the **image** data", but a scanned image was only *searched*. Live cleansing used the
+  attributes stored in the database rows, never the photo.
+- With `.env` pointing at the second laptop (`REMOTE_HOST`), 3 tests failed whenever that laptop was off: the
+  suite tested the remote machine instead of this checkout.
+- The "Our changes" sections below are still empty. Only the team can fill them; git cannot tell hand edits apart,
+  because every commit is under the same author.
+
+**Generated:**
+- `scan_with_image` in `matching/agency_cleansing.py` and `POST /api/v1/matching/agency/image-cleanse`. The scan
+  must resolve to one registered vehicle. Rows holding the same misreading are corrected (`IMG1`). Rows without
+  attributes are re-decided by the same rule engine using the photo's make / model / colour / type (`IMG2/R7`).
+  Rows with their own attributes keep their own decision. Preview first, then apply.
+- The "Cleanse recorded data with this scan" panel on 📷 Scan & Match.
+- `tests/test_image_cleansing.py` (6 tests).
+- `tests/conftest.py` forces local mode, so `.env` cannot redirect the test suite.
+- A rubric → evidence map at the top of `docs/approximate_matching.md`.
+
+**Design decision made during generation:** the first version let the "same reading as the photo" rule override a
+camera row whose own make / model / colour contradicted the photo. This was changed before testing: a row's own
+evidence beats the photo. `test_row_own_contradicting_evidence_beats_the_photo` checks it.
+
+**Verified:** 122 tests pass with the remote `.env` in place. The evaluator flow was run live over HTTP on an
+isolated copy of the project (so the demo data and audit log were not touched): REPL insert → scan stays in
+review → photo + attributes → corrected → rescan shows 0 anomalies.
+
+✍️ **Our changes:**
+- …
+
 ## What we reviewed and kept, changed, or rejected
 
 ✍️ Fill this in: suggestions you rejected or changed, bugs you spotted in generated code, and anything you verified

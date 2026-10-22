@@ -477,7 +477,84 @@ async function runMatch() {
     out.innerHTML = `<div class="empty-note" style="color:var(--status-danger);">Matching failed: ${esc(data.error)}</div>`;
     return;
   }
-  out.innerHTML = renderDecisionCard(data) + renderCandidateTable(data);
+  out.innerHTML = renderDecisionCard(data) + renderCandidateTable(data) + renderImageCleansePanel(data);
+  lastScanPayload = payload;
+}
+
+// ---------------------------------------------------------------------------
+// Scan: cleanse the recorded agency rows using this scan as evidence
+// ---------------------------------------------------------------------------
+let lastScanPayload = null;
+
+function renderImageCleansePanel(a) {
+  const resolved = a.decision === 'CORRECT' || a.decision === 'ACCEPT';
+  return `
+    <div class="section-title">Cleanse recorded data with this scan</div>
+    <div class="section-sub">
+      ${resolved
+        ? `The scan resolves to <span class="plate-text">${esc(a.corrected_plate || a.matched_plate)}</span>. Find the rows in IIB, Police,
+           ANPR and e-Challan that record this vehicle under a noisy identifier, and correct them using the photo
+           (its reading${a.context_available ? ' and the make / model / colour / type you entered' : ''}) as evidence.`
+        : 'The scan does not resolve to a single registered vehicle, so it cannot be used to correct recorded data. Enter the make, model and colour seen in the photo to add evidence.'}
+    </div>
+    ${resolved ? `<div class="toolbar" style="justify-content:flex-start;">
+      <button class="btn btn-secondary btn-sm" type="button" id="btn-image-preview" onclick="imageCleanse(false)">🔎 Find recorded rows for this vehicle</button>
+      <button class="btn btn-primary btn-sm" type="button" id="btn-image-apply" onclick="imageCleanse(true)" disabled>✏️ Apply corrections</button>
+    </div>
+    <div id="image-cleanse-result"></div>` : ''}`;
+}
+
+async function imageCleanse(apply) {
+  if (!lastScanPayload) return;
+  const box = document.getElementById('image-cleanse-result');
+  const btn = document.getElementById(apply ? 'btn-image-apply' : 'btn-image-preview');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span> Reading the agency databases…';
+  const payload = {
+    plate: lastScanPayload.plate, make: lastScanPayload.make, model: lastScanPayload.model,
+    color: lastScanPayload.color, vehicle_type: lastScanPayload.vehicle_type, method: lastScanPayload.method,
+    image_name: lastOcr ? lastOcr.file : null, apply,
+  };
+  const { ok, data } = await API.imageCleanse(payload).catch(err => ({ ok: false, data: { error: err.message } }));
+  btn.innerHTML = original;
+  btn.disabled = false;
+  if (!ok) {
+    box.innerHTML = `<div class="empty-note" style="color:var(--status-danger);">${esc(data.error)}</div>`;
+    return;
+  }
+  const open = data.related.filter(r => !r.resolved);
+  const fixable = open.filter(r => r.action === 'UPDATE').length;
+  document.getElementById('btn-image-apply').disabled = apply || fixable === 0;
+
+  let note = '';
+  if (data.applied) {
+    const errors = data.applied.errors.length ? ` Not applied: ${data.applied.errors.map(esc).join('; ')}` : '';
+    note = `<div class="decision-card d-CORRECT" style="margin-bottom:0.8rem;">✅ ${data.applied.changed_plates.length} row(s) corrected in the agency databases.
+      Every change is in the Agency Data change log with the original value.${errors}</div>`;
+  }
+  if (!data.related.length) {
+    box.innerHTML = note + `<div class="empty-note">No noisy recorded rows refer to ${esc(data.vehicle)}: the recorded data for this vehicle is already clean.</div>`;
+    return;
+  }
+  const rows = data.related.map(r => {
+    const s = r.assessment;
+    const [cls, label] = r.resolved ? ['badge-success', '👤 Resolved'] : (ACTION_BADGE[r.action] || ['badge-info', r.action]);
+    const target = r.new_value ? renderPlateDiff(s.normalized_plate, r.new_value) : '—';
+    return `<tr>
+      <td style="font-size:0.8rem;"><strong>${esc(AGENCY_LABEL[r.source] || r.source)}</strong><br><span style="color:var(--text-muted);">${esc(r.table)} row ${r.row_id}</span></td>
+      <td class="mono">"${esc(r.original_value)}"</td>
+      <td>${target}</td>
+      <td><span class="badge ${cls}">${label}</span></td>
+      <td style="font-size:0.78rem;">${esc(r.image_evidence || '')}</td>
+      <td class="reason-col" title="${esc(s.reason)}">${esc(s.rule || '')} ${esc(s.reason_code || '')}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = note + `
+    <div class="table-container"><table class="data-table">
+      <thead><tr><th>Database</th><th>Recorded value</th><th>Corrected to</th><th>Action</th><th>Photo evidence</th><th>Rule</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    ${apply ? '' : `<div class="section-sub" style="margin-top:0.5rem;">${fixable} row(s) will be corrected on Apply; the rest stay flagged for review.</div>`}`;
 }
 
 function renderDecisionCard(a, opts = {}) {
@@ -521,7 +598,67 @@ function renderDecisionCard(a, opts = {}) {
         ${opts.hideAudit ? '' : `<div><div class="k">Audit entry</div><div class="v">${a.audit_id ? `#${a.audit_id}` : 'not logged'}</div></div>`}
         ${a.latency_ms !== undefined ? `<div><div class="k">Latency</div><div class="v">${a.latency_ms} ms</div></div>` : ''}
       </div>
+      ${a.score_breakdown ? `<details class="calc-box viz-root" open>
+        <summary>🧮 How the combined score ${fmt(a.combined_score)} was calculated (${esc(a.score_breakdown.reading)} → ${esc(a.score_breakdown.plate)})</summary>
+        ${renderScoreBreakdown(a.score_breakdown)}
+      </details>` : ''}
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Score breakdown: the exact calculation behind plate similarity, context and combined
+// ---------------------------------------------------------------------------
+function renderScoreBreakdown(b) {
+  const ps = b.plate_similarity;
+  const methodName = METHOD_STYLE[b.method]?.short || b.method;
+  let step1 = '';
+  if (b.method === 'ocr_weighted') {
+    const edits = ps.edits.length
+      ? `<table class="calc-table"><thead><tr><th>Position</th><th>Reading → plate</th><th>Edit</th><th>Cost</th></tr></thead><tbody>
+          ${ps.edits.map(e => `<tr><td>${e.position + 1}</td>
+            <td class="plate-text">${esc(e.from || '∅')} → ${esc(e.to || '∅')}</td>
+            <td>${esc(e.kind)}</td><td class="mono">${e.cost}</td></tr>`).join('')}
+          <tr class="calc-total"><td colspan="3">Total cost</td><td class="mono">${ps.total_cost}</td></tr>
+        </tbody></table>`
+      : '<div class="calc-note">No edits: the reading is exactly this plate.</div>';
+    step1 = `${edits}<div class="calc-note">${esc(ps.note)}. Similarity = 1 − total cost ÷ length of the longer plate.</div>`;
+  } else {
+    step1 = `<div class="calc-note">${esc(ps.note)}.</div>`;
+  }
+
+  let step2;
+  if (b.context) {
+    step2 = `<table class="calc-table"><thead><tr><th>Attribute</th><th>Weight</th><th>Observed</th><th>Registered</th><th>Result</th></tr></thead><tbody>
+      ${b.context.attributes.map(r => `<tr><td>${esc(r.attribute)}</td><td class="mono">${r.weight.toFixed(2)}</td>
+        <td>${esc(r.observed) || '<span class="calc-muted">not observed</span>'}</td><td>${esc(r.registered) || '—'}</td>
+        <td><span class="ctx-pill ctx-${r.status}">${r.status === 'MATCH' ? '✓ agrees' : r.status === 'MISMATCH' ? '✗ contradicts' : '? not compared'}</span></td></tr>`).join('')}
+      </tbody></table>
+      <div class="calc-formula">${esc(b.context.formula)}</div>
+      <div class="calc-note">${esc(b.context.note)}.</div>`;
+  } else {
+    step2 = '<div class="calc-note">No make, model, colour or type was entered, so there is no context score. Enter what the photo shows in section 3 to add evidence.</div>';
+  }
+
+  const others = ['ocr_weighted', 'levenshtein', 'jaro_winkler', 'hybrid'].filter(k => k !== b.method).map(k => `
+    <tr><td><span class="swatch" style="background:${METHOD_STYLE[k].color}"></span>${esc(METHOD_STYLE[k].short)}</td>
+      <td class="mono">${fmt(b.methods[k].value)}</td><td class="calc-formula-inline">${esc(b.methods[k].formula)}</td></tr>`).join('');
+
+  return `
+    <div class="calc-step"><div class="calc-step-title">① Plate similarity — ${esc(methodName)} (the selected method) = <strong>${fmt(ps.value)}</strong></div>
+      ${step1}<div class="calc-formula">${esc(ps.formula)}</div></div>
+    <div class="calc-step"><div class="calc-step-title">② Context score = <strong>${b.context ? fmt(b.context.value) : '—'}</strong></div>${step2}</div>
+    <div class="calc-step"><div class="calc-step-title">③ Combined score = <strong>${fmt(b.combined.value)}</strong></div>
+      <div class="calc-formula">${esc(b.combined.formula)}</div>
+      <div class="calc-note">The decision rules use this combined score. The other methods below are shown only for comparison: their
+        numbers are on different scales, so a higher value does not mean a better match.</div></div>
+    <div class="calc-step"><div class="calc-step-title">Other methods (comparison only)</div>
+      <table class="calc-table"><tbody>${others}</tbody></table></div>`;
+}
+
+function toggleCalcRow(btn) {
+  const row = btn.closest('tr').nextElementSibling;
+  row.hidden = !row.hidden;
+  btn.textContent = row.hidden ? 'ⓘ how' : '✕ hide';
 }
 
 const SOURCE_SHORT = { VAHAN: 'VAHAN', IIB: 'IIB', POLICE: 'Police', ANPR: 'ANPR', ECHALLAN: 'Challan' };
@@ -546,13 +683,14 @@ function renderCandidateTable(a) {
       <td class="src-cell">${sourcePills(c.sources)}</td>
       <td style="font-size:0.82rem;">${esc(c.make)} ${esc(c.model)}<br><span style="color:var(--text-muted);">${esc(c.color)} • ${esc(c.vehicle_type)}</span></td>
       <td>${contextPills(c.context)}</td>
-      <td>${scoreCell(c.combined_score)}</td>
+      <td>${scoreCell(c.combined_score)}${c.breakdown ? `<button type="button" class="calc-toggle" onclick="toggleCalcRow(this)">ⓘ how</button>` : ''}</td>
       <td class="mono">${fmt(c.scores.ocr_weighted)}</td>
       <td class="mono">${fmt(c.scores.levenshtein)}</td>
       <td class="mono">${fmt(c.scores.jaro_winkler)}</td>
       <td class="mono">${fmt(c.scores.hybrid)}</td>
       <td><a href="/pages/inspector.html?plate=${encodeURIComponent(c.plate)}" class="btn btn-secondary btn-sm" style="text-decoration:none;">Dossier</a></td>
-    </tr>`).join('');
+    </tr>${c.breakdown ? `<tr class="calc-row" hidden><td colspan="12"><div class="calc-box calc-inline viz-root">
+      <div class="calc-inline-title">How ${esc(c.plate)} scored ${fmt(c.combined_score)}</div>${renderScoreBreakdown(c.breakdown)}</div></td></tr>` : ''}`).join('');
   return `
     <div class="section-title" style="margin-top:0;">Ranked candidates${more}</div>
     <div class="section-sub" style="margin-bottom:0.6rem;">
@@ -560,7 +698,7 @@ function renderCandidateTable(a) {
       <span class="plate-text"><span class="ch-ocr">amber</span></span> = OCR-confusable glyph,
       <span class="plate-text"><span class="ch-edit">red</span></span> = substitution,
       <span class="plate-text"><span class="ch-ins">blue</span></span> = insertion.
-      Combined = 65% plate similarity + 35% contextual agreement when attributes are observed.
+      Combined = 65% plate similarity + 35% contextual agreement when attributes are observed; click <strong>ⓘ how</strong> on any row for the full calculation.
       Candidates are drawn from all five agency databases; <em>Found in</em> shows which ones hold each plate.
     </div>
     <div class="table-container">
