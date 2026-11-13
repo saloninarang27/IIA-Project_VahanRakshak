@@ -110,8 +110,8 @@ def fetch_source_rows(fetch_service, role="ADMIN"):
             if res["status"] == 200 and rows is not None:
                 return key, {"rows": rows, "via": "API", "error": None}
             result["error"] = res.get("error") or f"HTTP {res['status']}"
-        try:
-            rows = _read_local(source["local_db"], source["fallback_sql"])
+        try:  # only an agency configured on THIS machine may be read from its file
+            rows = _read_local(source["local_db"], source["fallback_sql"]) if _is_local(source["base_url"]) else None
         except sqlite3.Error as e:
             rows, result["error"] = None, str(e)
         if rows is not None:
@@ -131,6 +131,12 @@ MAX_PUSHDOWN_ROWS = 300         # nor more than this many per request (seeded pl
 
 def _row_plate(key, row):
     return _plate(row.get("vehicle_registration_id") if key == "VAHAN" else row.get("plate"))
+
+
+def _is_local(url):
+    """True when the agency service is configured on this machine (no reading another laptop's data)."""
+    from urllib.parse import urlsplit
+    return (urlsplit(url).hostname or "") in ("127.0.0.1", "localhost", "::1")
 
 
 def match_rows(key, rows, plate, threshold, method):
@@ -177,8 +183,9 @@ def fetch_candidate_rows(fetch_service, plate, threshold, method, role):
             if res["status"] == 200 and rows is not None:
                 return key, {"rows": rows, "via": "API", "error": None}
             result["error"] = res.get("error") or f"HTTP {res['status']}"
-        try:  # replica on this machine (services co-located): still only the candidates are used
-            rows = local_match(key, plate, threshold, method) if os.path.exists(source["local_db"]) else None
+        try:  # the agency runs on THIS machine but is down: use its file (still only the candidates)
+            rows = (local_match(key, plate, threshold, method)
+                    if _is_local(source["base_url"]) and os.path.exists(source["local_db"]) else None)
         except sqlite3.Error as e:
             rows, result["error"] = None, str(e)
         if rows is not None:
