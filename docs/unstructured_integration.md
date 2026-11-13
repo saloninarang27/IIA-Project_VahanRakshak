@@ -62,7 +62,25 @@ the five databases, then each method.
 |---|---|---|---|---|---|---|
 | `bm25_query`: BM25 on the user's words | 0.166 | 0.282 | 0.51 | 0.331 | 0.020 | 0.085 |
 | `bm25_context`: BM25 on the discovered context terms | 0.451 | 0.822 | 0.992 | 0.859 | 0.041 | 0.017 |
-| **`context_entities`**: context + entity matching | **0.580** | **1.000** | **1.00** | **1.000** | 0.088 | **0.000** |
+| **`context_entities`**: context + entity matching | **0.580** | **1.000** | **1.00** | **1.000** | 0.098 | **0.000** |
+
+Context terms are weighted by relevance × SCORE term weight (POP · DIFF, `docs/context_discovery.md` §1.2). The
+same 59 queries with relevance-only weights:
+
+| Context term weights | Method | P@5 | R@10 | nDCG@10 | hard-neg@5 | decoy above a relevant doc |
+|---|---|---|---|---|---|---|
+| relevance only | `bm25_context` | 0.451 | 0.822 | 0.859 | 0.041 | 0.017 |
+| relevance × TW | `bm25_context` | 0.410 | 0.742 | 0.807 | **0.007** | **0.000** |
+| relevance only | `context_entities` | 0.580 | 1.000 | 1.000 | 0.088 | 0.000 |
+| relevance × TW | `context_entities` | 0.580 | 1.000 | 1.000 | 0.098 | 0.000 |
+
+- **What SCORE weighting does:** it pushes down terms common across the database (make, model, colour, big
+  cities). For text-only search that removes the decoys (other cars with the same make, model and colour):
+  hard-neg@5 0.041 → 0.007, and no decoy ever ranks above a relevant document. The price is recall, because some
+  relevant documents are found only through those common words.
+- **For the selected method it changes nothing that matters:** the plate is matched as an entity, so recall and
+  ranking are identical. hard-neg@5 differs by about 3 of 295 slots, all after every relevant document.
+- **Kept on**, because it makes the context itself distinctive (the UI shows TW per entity).
 
 Why `context_entities`:
 - **The context is what makes search work.** Plain BM25 on the query finds about a quarter of the relevant
@@ -99,6 +117,14 @@ For each main vehicle of the query:
 | ⚠️ NO_FIR | a news report describes an accident, but Police has no accident FIR |
 | 🧩 NOISY_PLATE | a document wrote the plate differently and was linked anyway (shows how) |
 
+**The other direction (EROCS, document → database):** when a document is added, the Mediator reads the
+entities it mentions and links them to the databases (`link_document` in `backend/context_api.py`):
+- plates written any way, resolved with the phase-2 matcher (push-down), e.g. `DL 01 AB 1OO4` → `DL01AB1004`
+  by rule R8 (OCR glyphs only, no other registered plate is close);
+- FIR, policy and claim numbers, cities, dates and events as they are read.
+
+The UI shows these links under the add-document box.
+
 **Need-to-know:** if the caller's role sees the claim or FIR tables only as keys, absence cannot be judged, so
 UNCLAIMED_INCIDENT and NO_FIR are not raised.
 
@@ -113,7 +139,8 @@ Example (police): `Is DL01AB1004 stolen? any insurance claim?`
 1. Ask `DL01AB1004 stolen` as **police**.
 2. Under "Add a document", add a tip-off: *"Tip-off: a blue Nexon with number DL 01 AB 1OO4 has been parked near
    Banjara Hills, Hyderabad since 13 Sep 2026; looks like the stolen one."*
-3. The query re-runs. The new document is in the results; it was linked to DL01AB1004 even though it wrote
+3. The add-document box shows the database entities the tip-off discusses: vehicle DL01AB1004 (from `1OO4`, rule
+   R8), Hyderabad, 2026-09-13, sighting / theft. The query re-runs. The new document is in the results; it was linked to DL01AB1004 even though it wrote
    `1OO4`. A new finding appears: *"Stolen vehicle sighted in Hyderabad on 2026-09-13, after the theft report …
    and after the last ANPR sighting."*
 4. Switch the method selector to "BM25 on query words only" to compare live.
@@ -125,4 +152,4 @@ Need-to-know, live:
 - a direct call to the Document Store gets 401.
 
 Verified across four machine addresses (Document Store on the "laptop 4" address next to ANPR).
-Tests: `tests/test_documents.py` (8 tests).
+Tests: `tests/test_documents.py` (9 tests).

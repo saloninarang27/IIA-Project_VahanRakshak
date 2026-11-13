@@ -46,6 +46,13 @@ UI: **🧭 Context Discovery** (`/pages/context.html`). API: `POST /api/v1/conte
 3. **Relevance:** `score = hop decay (1, 0.6, 0.35) × (1 + 0.5 × query terms found in the row)`.
 4. **Answer:** the top 30 facts, each with its table, hop and FK path, plus the cross-database keys found in
    them.
+5. **SCORE term weight** of every short text value in those facts (lecture: SCORE):
+   `TW = POP · DIFF`, `POP = NQ`, `DIFF = log10((1 + NR) / (1 + NR − NQ))`.
+   - NQ = rows of the query result with that value, NR = rows of the whole database with it.
+   - A value of a parent table is counted **through the FK join**, as in SCORE's augmented query: `Tata` is one row
+     of `vehicle_model`, but hundreds of registrations join to it, so it is common (TW 0.03). This car's plate is
+     rare (TW 0.95).
+   - Only the agency can count NR in its own database, so the weight is computed there (push-down).
    - **Need-to-know:** a table the role may not see is still walked through, so its keys can lead on, but its
      facts come back with only the key columns ("keys only").
    - **No bulk export:** at most 20 seed values per key type.
@@ -69,8 +76,10 @@ their facts cover, **across all databases together**. For "stolen Nexon Gurugram
 - **Entities:** the surviving facts are summarised into vehicles, owners, people (masked by role), FIRs,
   policies / claims, organisations, places, vehicle description, events and dates. Each is weighted by its best
   fact.
-- **Context terms:** the query terms plus the entities, with weights. This is the input to the unstructured
-  search in rubric 3.
+- **Context terms:** the query terms plus the entities. An entity's weight is the relevance of its best fact ×
+  its TW (normalised to the strongest term): a term must be both about the query and distinctive in its database.
+  This is the input to the unstructured search in rubric 3. `TERM_WEIGHTING = "relevance"` turns the TW factor
+  off; the document-search evaluation measures both (see `docs/unstructured_integration.md` §3).
 
 ## 2. Example (role POLICE): `accident claim FIR70001`
 
@@ -129,4 +138,4 @@ Checked on one machine with four loopback addresses (127.0.0.1–127.0.0.4) stan
 3. `DELETE FROM claim WHERE claim_no='CLM-DEMO-1';` then ask again, and it is gone. There is no cache: every query
    goes to the live databases.
 
-Tests: `tests/test_context.py` (10 tests).
+Tests: `tests/test_context.py` (11 tests, including the SCORE weights against the lecture's worked example).
