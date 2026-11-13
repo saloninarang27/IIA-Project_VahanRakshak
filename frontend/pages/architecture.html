@@ -340,8 +340,8 @@
       if (!container) return;
 
       try {
-        const host = window.location.hostname || '127.0.0.1';
-        const res = await fetch(`http://${host}:5001/api/v1/schema-matching`);
+
+        const res = await apiFetch(`${MEDIATOR_BASE_URL}/schema-matching`);   // logged-in call: /api needs a token
         const json = await res.json();
 
         if (json.status === 'success' && json.data && json.data.sources) {
