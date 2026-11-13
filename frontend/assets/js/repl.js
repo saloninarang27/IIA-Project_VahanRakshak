@@ -6,33 +6,38 @@
 const PRESET_QUERIES = {
   vahan: [
     { label: "Top 10 Registrations", sql: "SELECT vehicle_registration_id, owner_name, vehicle_make, vehicle_model, color, registration_status FROM vehicle_registration LIMIT 10;" },
-    { label: "Expired RC Vehicles", sql: "SELECT vehicle_registration_id, owner_name, registration_expiry_date, registration_status FROM vehicle_registration WHERE registration_status != 'ACTIVE' LIMIT 10;" },
-    { label: "Table Schema (PRAGMA)", sql: "PRAGMA table_info(vehicle_registration);" }
+    { label: "FK Join: Owner + Model + RTO", sql: "SELECT r.vehicle_registration_id, o.owner_name, o.city, m.make, m.model, m.segment, t.rto_name FROM vehicle_registration r JOIN owner o ON o.owner_id = r.owner_id JOIN vehicle_model m ON m.model_id = r.model_id JOIN rto_office t ON t.rto_code = r.rto_code LIMIT 10;" },
+    { label: "FK Join: Ownership Transfers", sql: "SELECT r.vehicle_registration_id, f.owner_name AS previous_owner, n.owner_name AS new_owner, x.transfer_date, x.transfer_reason FROM ownership_transfer x JOIN vehicle_registration r ON r.registration_id = x.registration_id JOIN owner f ON f.owner_id = x.from_owner_id JOIN owner n ON n.owner_id = x.to_owner_id LIMIT 10;" },
+    { label: "Foreign Keys (PRAGMA)", sql: "PRAGMA foreign_key_list(vehicle_registration);" }
   ],
   iib: [
-    { label: "Uninsured Policies", sql: "SELECT registration_no, insurer_name, policy_number, policy_expiry_date, insurance_status FROM insurance_policy WHERE insurance_status = 'UNINSURED' LIMIT 10;" },
-    { label: "Expiring Policies", sql: "SELECT registration_no, insurer_name, policy_number, policy_expiry_date, insurance_status FROM insurance_policy ORDER BY policy_expiry_date ASC LIMIT 10;" },
-    { label: "Table Schema (PRAGMA)", sql: "PRAGMA table_info(insurance_policy);" }
+    { label: "Expired Policies", sql: "SELECT registration_no, insurer_name, policy_number, policy_expiry_date, insurance_status FROM insurance_policy WHERE insurance_status = 'EXPIRED' LIMIT 10;" },
+    { label: "FK Join: Policy + Insurer + Holder", sql: "SELECT p.registration_no, p.policy_number, i.insurer_name, i.irdai_reg_no, h.holder_name, h.owner_ref FROM insurance_policy p JOIN insurer i ON i.insurer_id = p.insurer_id JOIN policyholder h ON h.holder_id = p.holder_id LIMIT 10;" },
+    { label: "FK Join: Claims with FIR", sql: "SELECT p.registration_no, c.claim_no, c.incident_type, c.incident_city, c.fir_reference, c.claim_amount, c.claim_status FROM claim c JOIN insurance_policy p ON p.policy_id = c.policy_id ORDER BY c.incident_date DESC LIMIT 10;" },
+    { label: "Foreign Keys (PRAGMA)", sql: "PRAGMA foreign_key_list(claim);" }
   ],
   police: [
     { label: "Stolen Vehicles", sql: "SELECT vehicle_no, theft_status, theft_report_date, authority_reference FROM theft_scrap_record WHERE theft_status = 'STOLEN' LIMIT 10;" },
-    { label: "Scrapped Vehicles", sql: "SELECT vehicle_no, scrapping_status, scrapping_date, certificate_no FROM theft_scrap_record WHERE scrapping_status = 'SCRAPPED' LIMIT 10;" },
-    { label: "Table Schema (PRAGMA)", sql: "PRAGMA table_info(theft_scrap_record);" }
+    { label: "FK Join: FIR + Station + Recovery", sql: "SELECT f.fir_no, f.vehicle_no, f.offence_type, s.station_name, f.case_status, r.recovery_date FROM fir f JOIN police_station s ON s.station_id = f.station_id LEFT JOIN recovery r ON r.fir_no = f.fir_no LIMIT 10;" },
+    { label: "FK Join: Scrapped at RVSF", sql: "SELECT t.vehicle_no, t.scrapping_date, v.facility_name, v.licence_no FROM theft_scrap_record t JOIN rvsf_facility v ON v.rvsf_id = t.rvsf_id LIMIT 10;" },
+    { label: "Foreign Keys (PRAGMA)", sql: "PRAGMA foreign_key_list(theft_scrap_record);" }
   ],
   anpr: [
-    { label: "Recent Captures", sql: "SELECT plate_number, camera_id, location, captured_timestamp, detected_speed_kmh FROM vehicle_capture ORDER BY captured_timestamp DESC LIMIT 10;" },
-    { label: "Camera Locations", sql: "SELECT location, COUNT(*) as total_sightings FROM vehicle_capture GROUP BY location ORDER BY total_sightings DESC;" },
-    { label: "Table Schema (PRAGMA)", sql: "PRAGMA table_info(vehicle_capture);" }
+    { label: "Recent Captures", sql: "SELECT plate_number, camera_id, location, captured_timestamp, confidence_score FROM vehicle_capture ORDER BY captured_timestamp DESC LIMIT 10;" },
+    { label: "FK Join: Capture + Camera + Plaza", sql: "SELECT c.plate_number, c.captured_timestamp, k.camera_model, p.plaza_name, p.highway, p.city FROM vehicle_capture c JOIN camera k ON k.camera_id = c.camera_id JOIN toll_plaza p ON p.plaza_id = k.plaza_id LIMIT 10;" },
+    { label: "FK Join: Hotlist Alerts", sql: "SELECT c.plate_number, a.alert_type, a.raised_at, a.alert_status, t.txn_status FROM anpr_alert a JOIN vehicle_capture c ON c.capture_id = a.capture_id LEFT JOIN toll_transaction t ON t.capture_id = c.capture_id WHERE a.alert_type LIKE 'HOTLIST%' LIMIT 10;" },
+    { label: "Foreign Keys (PRAGMA)", sql: "PRAGMA foreign_key_list(anpr_alert);" }
   ],
   echallan: [
-    { label: "Recent Challans", sql: "SELECT vehicle_identifier, ministry_reference, report_type, severity, fine_amount, report_status FROM ministry_report ORDER BY submitted_at DESC LIMIT 10;" },
-    { label: "Challan Statistics", sql: "SELECT report_status, COUNT(*) as count, SUM(fine_amount) as total_fines FROM ministry_report GROUP BY report_status;" },
-    { label: "Table Schema (PRAGMA)", sql: "PRAGMA table_info(ministry_report);" }
+    { label: "Recent Challans", sql: "SELECT vehicle_identifier, ministry_reference, report_type, severity, report_status FROM ministry_report ORDER BY submitted_at DESC LIMIT 10;" },
+    { label: "FK Join: Challan + Offence + Officer", sql: "SELECT r.vehicle_identifier, r.ministry_reference, o.mv_act_section, o.fine_amount, e.officer_name, e.city FROM ministry_report r JOIN offence_code o ON o.offence_code = r.offence_code JOIN enforcement_officer e ON e.officer_id = r.officer_id LIMIT 10;" },
+    { label: "Fines Collected per Offence", sql: "SELECT o.offence_code, o.description, COUNT(p.payment_id) AS paid, SUM(p.amount) AS collected FROM offence_code o LEFT JOIN ministry_report r ON r.offence_code = o.offence_code LEFT JOIN challan_payment p ON p.report_id = r.report_id GROUP BY o.offence_code;" },
+    { label: "Foreign Keys (PRAGMA)", sql: "PRAGMA foreign_key_list(ministry_report);" }
   ],
   dwh: [
     { label: "Materialized Dossiers", sql: "SELECT vehicle_identifier, make, model, risk_level, insurance_status, suspicion_status, refreshed_at FROM mv_vehicle_complete_history LIMIT 10;" },
     { label: "High & Critical Risk", sql: "SELECT vehicle_identifier, make, model, risk_level, insurance_status FROM mv_vehicle_complete_history WHERE risk_level IN ('HIGH', 'CRITICAL') LIMIT 10;" },
-    { label: "Fact Events", sql: "SELECT event_id, vehicle_key, event_type, source_system, captured_speed FROM FACT_VEHICLE_EVENT LIMIT 10;" }
+    { label: "Fact Events", sql: "SELECT event_key, vehicle_key, event_type, event_value, source_system FROM FACT_VEHICLE_EVENT LIMIT 10;" }
   ]
 };
 
