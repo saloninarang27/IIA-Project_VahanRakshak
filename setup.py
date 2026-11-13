@@ -9,7 +9,7 @@ the data warehouse, and refreshes the materialized-view tables. After this
 completes, `streamlit run app.py` and `pytest` are both ready to use.
 """
 import db
-from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry
+from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry, seed_relations
 from etl.pipeline import run_pipeline
 from dwh.refresh_views import refresh_all_views
 
@@ -24,6 +24,7 @@ def main():
     seed_registration.seed()
     seed_theft_scrap.seed()
     seed_ministry.seed()
+    seed_relations.seed()   # related tables (FK -> PK) of every agency database
 
     print("\n[3/4] Running ETL pipeline (extract -> transform -> load into DWH)...")
     run_pipeline()
