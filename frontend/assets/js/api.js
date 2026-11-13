@@ -115,6 +115,15 @@ const API = {
     return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) };
   },
 
+  async discoverContext(query) {
+    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/query`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query })
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = { error: `HTTP ${res.status}` }; }
+    return { ok: res.ok, status: res.status, data };
+  },
+
   getMatchingConfig() { return this._matching('/config'); },
 
   ocrPlateImage(file) {

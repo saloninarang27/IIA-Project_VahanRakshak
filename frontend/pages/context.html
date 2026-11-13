@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Context Discovery | VahanRakshak</title>
+  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/components.css">
+  <link rel="stylesheet" href="/assets/css/matching.css">
+  <link rel="stylesheet" href="/assets/css/context.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <a href="/" class="brand-wrapper">
+      <div class="brand-emblem">🛡️</div>
+      <div class="brand-text">
+        <h1>VahanRakshak</h1>
+        <span>Uninsured Vehicle Identification System</span>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">🏠 Dashboard</a>
+      <a href="/pages/inspector.html">🔍 Vehicle Inspector</a>
+      <a href="/pages/matching.html">🧩 Plate Matching</a>
+      <a href="/pages/context.html" class="active">🧭 Context Discovery</a>
+      <a href="/pages/fleet.html">📋 Fleet Intelligence</a>
+      <a href="/pages/echallan.html">🏛️ E-Challan Portal</a>
+      <a href="/pages/architecture.html">🏗️ System Topology</a>
+      <a href="/pages/repl.html">💻 SQL REPL</a>
+    </nav>
+
+    <div class="header-status-pill" id="global-health-pill">
+      <span class="status-dot"></span> Connecting...
+    </div>
+  </header>
+
+  <main class="content-area">
+    <div class="glass-card" style="margin-bottom:1.5rem;">
+      <h2 style="font-size:1.5rem; font-weight:800;">🧭 Federated Context Discovery</h2>
+      <p style="font-size:0.85rem; color:var(--text-muted); max-width:900px; line-height:1.5; margin-bottom:1rem;">
+        The query is split into sub-queries and sent to all five agency databases, each on its own machine.
+        Every database follows its own FK → PK relationships to discover the context around the query and returns
+        its most relevant facts plus the keys that lead into other databases (an owner id, an FIR number…).
+        The Mediator sends those keys to the databases that hold them in the next round, and keeps only the facts
+        closely related to the query.
+      </p>
+      <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+        <input id="ctx-query" class="search-input" style="flex:1; min-width:320px;"
+               placeholder="e.g. Is DL01AB1004 stolen? any insurance claim?" autocomplete="off">
+        <button id="ctx-run" class="btn btn-primary">Discover context</button>
+      </div>
+      <div id="ctx-examples" style="margin-top:0.6rem; display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.8rem;">
+        <span style="color:var(--text-muted);">Try:</span>
+      </div>
+    </div>
+
+    <div id="ctx-error" class="glass-card" style="display:none; border-color:#fecaca; color:#b91c1c; margin-bottom:1.5rem;"></div>
+
+    <div id="ctx-result" style="display:none;">
+      <div class="ctx-grid">
+        <div class="glass-card">
+          <h3 class="ctx-h">1. Query → sub-query</h3>
+          <div id="ctx-parsed"></div>
+        </div>
+        <div class="glass-card">
+          <h3 class="ctx-h">Accumulated context</h3>
+          <div id="ctx-summary"></div>
+        </div>
+      </div>
+
+      <div class="glass-card" style="margin:1.5rem 0;">
+        <h3 class="ctx-h">2. Federation rounds <span class="ctx-sub">each agency answers from its own machine</span></h3>
+        <div id="ctx-rounds"></div>
+      </div>
+
+      <div class="glass-card" style="margin-bottom:1.5rem;">
+        <h3 class="ctx-h">3. Context entities <span class="ctx-sub">weight = relevance of the best fact they come from</span></h3>
+        <div id="ctx-entities"></div>
+      </div>
+
+      <div class="glass-card">
+        <h3 class="ctx-h">4. Discovered facts <span class="ctx-sub">relevance = hop decay × (1 + 0.5 × query terms) × round decay</span></h3>
+        <div id="ctx-facts"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/assets/js/api.js"></script>
+  <script src="/assets/js/app.js"></script>
+  <script src="/assets/js/context.js"></script>
+</body>
+</html>
