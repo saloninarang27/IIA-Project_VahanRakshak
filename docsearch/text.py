@@ -13,8 +13,8 @@ these those he she they his her their there here as into about after before near
 has have had will would could should may might can than then also which who whom what when where""".split())
 
 # plate written in any style: state letters, district number, series, number - each part may be split by a
-# space / hyphen / dot, and digits may be OCR-misread as O / I / L (and series letters as 8 / 0 ...)
-PLATE_RE = re.compile(r"\b[A-Za-z]{2}[\s.\-]?[0-9OoIiLl]{1,2}[\s.\-]?[A-Za-z0-9]{0,3}[\s.\-]?[A-Za-z0-9]{3,4}\b")
+# space / hyphen / dot (the series too: Delhi's "DL 7C D 1939"), and digits may be OCR-misread as O / I / L (and series letters as 8 / 0 ...)
+PLATE_RE = re.compile(r"\b[A-Za-z]{2}[\s.\-]?[0-9OoIiLl]{1,2}[\s.\-]?[A-Za-z0-9]{0,3}(?:[\s.\-][A-Za-z]{1,2})?[\s.\-]?[A-Za-z0-9]{3,4}\b")
 NOT_PLATE = re.compile(r"^(FIR|POL|CLM|OWN|MOT)", re.I)   # our record ids look plate-like
 ENDING_RE = re.compile(r"\b(?:ending(?: in| with)?|last (?:four|4) digits)\s*(\d{4})\b", re.I)
 ID_RES = {"fir": re.compile(r"\bFIR\s*-?\s*(\d{3,6})\b", re.I),

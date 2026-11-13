@@ -31,6 +31,7 @@ def iq(query, role):
 
 
 def test_plates_ids_places_dates_are_read_from_free_text():
+    assert T.plates_in("a white Creta DL 7C D 1939") == ["DL7CD1939"]          # Delhi style, split series
     s = ("FIR No. FIR5004: the blue Tata Nexon DL-01-AB-1004 was stolen near Golf Course Road, Gurugram on "
          "15 Aug 2026. A caller later saw dl 01 ab 1o04 in Chennai (2026-09-02), policy POL100004.")
     e = T.entities(s)
@@ -125,3 +126,10 @@ def test_a_document_is_linked_to_the_database_entities_it_discusses():
         L = link_document("Tip-off: DL 01 AB 1OO4 seen in Hyderabad on 13 Sep 2026, ref FIR5004")
     assert L["vehicles"] == ["DL01AB1004"] and L["plate_resolution"][0]["rule"] == "R8"
     assert L["firs"] == ["FIR5004"] and L["cities"] == ["Hyderabad"] and L["dates"] == ["2026-09-13"]
+
+
+def test_a_plate_no_database_knows_gets_no_unrelated_documents():
+    # random plate from the internet: no context, so keyword hits ("stolen") are not "related documents"
+    res = iq("DL7CD1939 stolen?", "POLICE")
+    assert res["facts"] == [] and res["documents"]["no_context"]
+    assert res["documents"]["results"] == []
