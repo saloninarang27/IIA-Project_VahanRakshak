@@ -249,4 +249,56 @@ Remove the hard-coded REPL password. Keep all phase-1/2 features and tests worki
 - the audit table cannot be read or changed through SQL
 - the e-Challan webhook still invalidates the cache
 
+### P3.1 Each database expanded to 5–6 related tables (rubric 1)
+
+**Prompt:** "Expand every agency database to 4–6 tables, so that a vehicle's information is distributed over tables
+joined by FK → PK:
+- **Phase 1/2 must keep working:** keep each existing core table and its columns, and add the new tables around
+  it.
+- **Enforcement:** the services must enforce the foreign keys on live writes, so a bad insert or delete in the SQL
+  console is rejected.
+- **Consistent story:** seed the new tables so that the keys shared across databases agree (insured person =
+  registered owner, claim → FIR).
+- **Deterministic:** the phase-1/2 dataset must not change."
+
+**Generated:**
+
+| Database | New tables | FK |
+|---|---|---|
+| VAHAN | `owner`, `rto_office`, `vehicle_model`, `ownership_transfer`, `hypothecation` | 7 |
+| IIB | `insurer`, `policyholder`, `claim`, `premium_payment` | 4 |
+| Police | `police_station`, `fir`, `recovery`, `rvsf_facility` | 4 |
+| ANPR | `toll_plaza`, `camera`, `anpr_alert`, `toll_transaction` | 4 |
+| e-Challan | `offence_code`, `enforcement_officer`, `challan_payment`, `court_case` | 4 |
+
+- `seed/seed_relations.py`: its own random seed, so the original 2,000 vehicles are unchanged.
+- `PRAGMA foreign_keys = ON` in all five services.
+- FK-join presets in the SQL console.
+- `docs/database_design.md`.
+- `tests/test_relations.py` (8 tests).
+
+**Design decisions made during generation:**
+- **Cross-database links are reference keys, not foreign keys.** The databases run on different machines, so
+  `policyholder.owner_ref` → VAHAN owner and `claim.fir_reference` → Police FIR are plain keys. The mediator
+  follows them in step 2.
+- **The core tables keep their published columns** (e.g. `vehicle_registration.owner_name`) next to the new FKs, so
+  the phase-1/2 code and its 139 tests did not need changes.
+- **Parent rows first.** VAHAN `POST /rc` now creates the owner row before the registration, because `owner_id` is a
+  foreign key.
+
+**Found while cross-checking:**
+- 6 of the existing SQL console presets referenced columns that do not exist (`certificate_no`,
+  `detected_speed_kmh`, `fine_amount`, `event_id`, status `UNINSURED`). They would have errored in front of the
+  evaluator, so all were fixed and every preset was run against the seeded databases.
+- `setup.py` crashed when its output was piped on Windows (cp1252 cannot print ✓); it runs fine in a normal
+  terminal.
+
+**Verified:** 147 tests pass (3 skipped). Live over HTTP (SQL console, admin):
+- a claim for an unknown policy → `FOREIGN KEY constraint failed`
+- deleting an owner who still has a vehicle → rejected
+- a 3-table FIR / station / recovery join works
+- a new challan gets offence code `MVA-196`
+- vehicle lookup and the phase-2 agency scan are unchanged
+- the phase-2 algorithm result is unchanged (F1 0.877)
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
