@@ -8,12 +8,24 @@ import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify, make_response
-from flask_cors import CORS
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from backend import security
+from matching.sources import register_match_endpoint
 
 app = Flask(__name__)
-CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parivahan_vahan.db")
+
+# Only the Mediator may call this service (signed requests); bulk and write endpoints need a role.
+# No CORS: browsers never talk to an agency directly.
+ACCESS_POLICY = {
+    ("GET", "/api/v1/registry/index"): {"ADMIN"},
+    ("POST", "/api/v1/rc"): {"ADMIN"},
+    ("POST", "/api/v1/internal/execute-sql"): {"ADMIN"},
+}
+security.protect_service(app, DB_PATH, ACCESS_POLICY)
+register_match_endpoint(app, "VAHAN")
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
