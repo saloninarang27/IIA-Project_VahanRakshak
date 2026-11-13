@@ -315,19 +315,36 @@ async function browserOcr(file, meta) {
         }
       },
     });
-    // Sparse text: find text anywhere in the photo instead of treating it as one line.
-    // No character whitelist - lower-case output is how watermarks and brand names get filtered out.
-    await tesseractWorker.setParameters({ tessedit_pageseg_mode: '11' });
+    // Sparse text (PSM 11) first: find text anywhere in the photo. No character whitelist -
+    // lower-case output is how watermarks and brand names get filtered out.
   }
-  const { data } = await tesseractWorker.recognize(file);
-  const detections = (data.words || []).map(w => ({
-    text: w.text, confidence: (w.confidence || 0) / 100, box: [w.bbox.x0, w.bbox.y0, w.bbox.x1, w.bbox.y1],
-  }));
-  const selected = selectPlateText(detections);
-  const img = document.getElementById('ocr-preview-img');
+  // Up to three passes; stop at the first complete plate, otherwise keep the best-scoring reading:
+  //  1. grayscale, upscaled to ~1200 px wide (small web images give Tesseract no words at all)
+  //  2. the original image, sparse text      3. the original image read as one block of text
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(3, Math.max(1, 1200 / bmp.width));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.filter = 'grayscale(1)';
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  let selected = null, detections = [];
+  for (const [image, psm, factor] of [[canvas, '11', scale], [file, '11', 1], [file, '6', 1]]) {
+    await tesseractWorker.setParameters({ tessedit_pageseg_mode: psm });
+    const { data } = await tesseractWorker.recognize(image);
+    detections = (data.words || []).map(w => ({
+      text: w.text, confidence: (w.confidence || 0) / 100,
+      box: [w.bbox.x0, w.bbox.y0, w.bbox.x1, w.bbox.y1].map(v => v / factor),   // back to image pixels
+    }));
+    const pick = selectPlateText(detections);
+    if (!selected || pick.score > selected.score) selected = pick;
+    if (COMPLETE_PLATE_RE.test(normalizePlate(selected.text))) break;
+  }
   return {
     engine: 'browser: tesseract.js', raw_text: selected.text, confidence: selected.confidence,
-    box: selected.box, imageSize: img ? [img.naturalWidth, img.naturalHeight] : null,
+    box: selected.box, imageSize: [bmp.width, bmp.height],
     alternatives: selected.alternatives, detections: detections.length,
   };
 }
@@ -335,6 +352,9 @@ async function browserOcr(file, meta) {
 /* ---- Plate selection: JS port of select_plate_text() in matching/ocr.py ---- */
 const INDIAN_PLATE_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$/;
 const BH_SERIES_RE = /^\d{2}BH\d{4}[A-Z]{1,2}$/;
+// whole plate whose series letters may be OCR-confused digits (D->0, I->1, Z->2, S->5, B->8): DL7C01939
+const FULL_PLATE_OCR_RE = /^[A-Z]{2}\d{1,2}[A-Z01258]{1,3}\d{4}$/;
+const COMPLETE_PLATE_RE = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$/;
 
 function plateScore(text, height, maxHeight, confidence) {
   const norm = normalizePlate(text);
@@ -342,7 +362,9 @@ function plateScore(text, height, maxHeight, confidence) {
   let score = height / maxHeight + 0.3 * confidence;
   if (/[A-Z]/.test(norm)) score += 0.15;
   score += 0.02 * norm.length;
-  if (INDIAN_PLATE_RE.test(norm) || BH_SERIES_RE.test(norm)) score += 0.35;
+  if (BH_SERIES_RE.test(norm) || (INDIAN_PLATE_RE.test(norm) && /\d{4}$/.test(norm))) score += 0.35;  // the whole plate
+  else if (FULL_PLATE_OCR_RE.test(norm) && /[A-Z]/.test(norm.slice(2, -4))) score += 0.3;  // series letter misread as a digit
+  else if (INDIAN_PLATE_RE.test(norm)) score += 0.15;  // plate-shaped, but possibly a fragment (DL7C0 of DL 7C D 1939)
   return score;
 }
 
@@ -370,7 +392,7 @@ function joinRun(run) {
 }
 
 function selectPlateText(detections) {
-  const empty = { text: '', confidence: 0, box: null, alternatives: [] };
+  const empty = { text: '', confidence: 0, box: null, alternatives: [], score: -1 };
   const items = detections
     // drop border strokes ("|") and real words (watermarks, brand names); short tokens such
     // as "lA" are kept because OCR often reads plate fragments in lower case
@@ -428,7 +450,7 @@ function selectPlateText(detections) {
   });
   const best = unique[0];
   return {
-    text: best.text, confidence: best.confidence, box: best.box,
+    text: best.text, confidence: best.confidence, box: best.box, score: best.score,
     alternatives: unique.slice(1, 5).map(c => ({ text: c.text, normalized: c.normalized, score: c.score })),
   };
 }
