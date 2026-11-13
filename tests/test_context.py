@@ -130,3 +130,13 @@ def test_mediator_endpoint_requires_login_and_runs():
         "/api/v1/context/query", json={"query": "DL01AB1004"}).status_code == 401
     res = mediator_app.test_client().post("/api/v1/context/query", json={"query": "DL01AB1004 stolen"})
     assert res.status_code == 200 and res.get_json()["facts"]
+
+
+def test_score_term_weight_prefers_rare_values_over_common_ones():
+    # SCORE TW = POP * DIFF, counted by each agency over its own (FK-joined) tables
+    ents = ctx("Is DL01AB1004 stolen?")["entities"]
+    tw = {e["value"]: e["tw"] for group in ents.values() for e in group if e.get("tw") is not None}
+    assert tw["DL01AB1004"] > tw["Tata"] > 0          # one car's plate vs a make shared by many cars
+    assert tw["FIR5004"] > tw["Blue"]
+    from backend.context_engine import score_tw
+    assert (score_tw(3, 4), score_tw(1, 4)) == (1.194, 0.097)       # lecture slide 28: terms A and B of Q1

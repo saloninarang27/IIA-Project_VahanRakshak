@@ -115,3 +115,13 @@ def test_insurer_sees_no_police_documents_in_the_integrated_answer():
     assert d["documents"]["hidden_by_role"] > 0
     assert not {"FIR_NARRATIVE", "OFFICER_NOTE"} & {r["doc_type"] for r in d["documents"]["results"]}
     assert "SURVEYOR_REPORT" in {r["doc_type"] for r in d["documents"]["results"]}
+
+
+def test_a_document_is_linked_to_the_database_entities_it_discusses():
+    # EROCS direction: document -> entities, the plate resolved with the phase-2 matcher
+    from backend.context_api import link_document
+    with mediator_app.test_request_context():
+        g.role = "POLICE"
+        L = link_document("Tip-off: DL 01 AB 1OO4 seen in Hyderabad on 13 Sep 2026, ref FIR5004")
+    assert L["vehicles"] == ["DL01AB1004"] and L["plate_resolution"][0]["rule"] == "R8"
+    assert L["firs"] == ["FIR5004"] and L["cities"] == ["Hyderabad"] and L["dates"] == ["2026-09-13"]
