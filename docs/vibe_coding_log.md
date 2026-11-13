@@ -440,4 +440,49 @@ the query, then integrate them with the structured results. Requirements:
   - deleting it is refused for police (403) and works for admin.
 - **UI:** the page's JavaScript was run on the live responses; it renders with no undefined values.
 
+### P3.4 Lecture alignment (SCORE, EROCS), UI and README for all three phases
+
+**Prompt:** "Check the phase-3 work against the lectures on string matching, entity matching and SCORE / EROCS.
+- **Gaps:** add what is missing, and keep each addition only if measurement supports it.
+- **UI:** make the Context Discovery page easier to follow during the demo.
+- **README:** give the rubric for all three phases, the security work from the phase-2 feedback, and where each
+  lecture concept is used.
+- **Verify:** run the tests, the evaluation and the four-machine demo again."
+
+**Generated:**
+- **SCORE term weight** `TW = POP · DIFF` (`backend/context_engine.py`):
+  - computed by each agency for the values of its returned facts;
+  - a parent-table value is counted through the FK join (SCORE's augmented query);
+  - the Mediator multiplies each context term's relevance by its normalised TW (`backend/context_api.py`).
+- **EROCS direction:** `link_document` reads the entities of a newly added document and resolves its plates with
+  the phase-2 matcher, so the Mediator reports which database entities the document discusses.
+- **Evaluation:** `docsearch/evaluation.py` also runs every context method with relevance-only weights.
+- **UI:**
+  - a pipeline stepper with the counts of each step, stat tiles, and the integrated answer first;
+  - finding callouts, document cards with score bars, and TW on every context entity;
+  - the EROCS links under the add-document box.
+- **Docs and tests:** the README rubric for phases 1–3, the security table and the course-concepts table; the
+  updated write-ups; one test each for TW and EROCS.
+
+**Found while testing (and fixed):**
+- **Dimension values weighted as rare.** At first NR was counted only in the value's own table. `Tata` (one row
+  of `vehicle_model`) and the insurer's name then looked as rare as the plate. They are now counted through the
+  FK join: `Tata` 0.03 against the plate's 0.95.
+- **The lecture uses log10.** Switched from ln so the weights match slide 28 (NQ = 3, NR = 4 → TW 1.194). The
+  test checks it. Ranking is unchanged because the weights are normalised.
+- **Measured, not assumed:**
+  - with SCORE weights, text-only context search loses its decoys (hard-neg@5 0.041 → 0.007, decoy above a
+    relevant document 0.017 → 0), at a recall cost (R@10 0.82 → 0.74);
+  - the selected method keeps nDCG@10 1.00 and R@10 1.00 either way.
+- **Mixed line endings:** a patch wrote CRLF into an LF file; normalised before committing.
+
+**Verified:**
+- **Tests:** 172 pass (3 skipped); the validation script passes 18/18.
+- **Four machine addresses, run twice:**
+  - unsigned calls to an agency or to the Document Store get 401;
+  - police search 921 documents, the insurer 795;
+  - a tip-off with `DL 01 AB 1OO4` is linked to DL01AB1004 (rule R8), ranks 5th and raises the Hyderabad lead;
+  - deleting it gets 403 for police and works for admin.
+- **UI:** the page's JavaScript was run on five live responses and the EROCS reply: no undefined or NaN values.
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
