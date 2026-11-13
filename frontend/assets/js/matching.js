@@ -204,11 +204,18 @@ async function loadConfig() {
     return;
   }
   matchingConfig = data;
+  if (data.index.mode === 'PUSH_DOWN') {
+    // Non-admin session: no plate list is loaded here; each agency matches its own plates per search.
+    meta.textContent = 'Push-down matching: each agency returns only its candidates';
+    meta.title = 'The full plate lists of the five agencies are only available to ADMIN batch jobs.';
+    meta.className = 'badge badge-info';
+  } else {
   const sources = data.index.sources || [];
   const live = sources.filter(s => s.via === 'API').length;
   meta.textContent = `${data.index.size.toLocaleString()} plates from ${sources.length} databases • ${live}/${sources.length} live`;
   meta.title = sources.map(s => `${s.label} (${s.identifier_column}): ${s.plates} plates via ${s.via}${s.error ? ' - ' + s.error : ''}`).join('\n');
   meta.className = live === sources.length ? 'badge badge-success' : 'badge badge-warning';
+  }
 
   const select = document.getElementById('method-select');
   select.innerHTML = data.methods.map(m =>

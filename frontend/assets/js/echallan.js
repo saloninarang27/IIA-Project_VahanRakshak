@@ -28,6 +28,11 @@ async function loadChallans() {
 
   try {
     const data = await API.getChallans({ page: challanPage, limit: 15, status: filter });
+    if (data.error && !data.challans) {  // e.g. 403: this role may not list challans
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:#ef4444;"></td></tr>`;
+      tbody.querySelector('td').textContent = data.error;
+      return;
+    }
 
     if (!data.challans || data.challans.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">No challans found.</td></tr>`;

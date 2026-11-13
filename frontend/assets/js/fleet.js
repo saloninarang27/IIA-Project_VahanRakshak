@@ -59,6 +59,7 @@ async function loadFleetTable() {
       location: location,
       search: search
     });
+    if (res.error) throw new Error(res.error);  // e.g. 403: this role may not list vehicles
 
     if (latencyBadge) {
       latencyBadge.textContent = `⚡ Server-side SQL query: ${res.clientLatencyMs}ms (${res.total.toLocaleString()} total rows)`;
