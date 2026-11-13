@@ -19,25 +19,33 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 import backend.config as b_config
 
-# If REMOTE_HOST is configured, we only need to launch Mediator (5001) & Frontend (3000)
-# because the 5 database microservices are already running on the remote laptop!
-is_remote = b_config.DEFAULT_HOST not in ("127.0.0.1", "localhost")
+ALL_SERVICES = {
+    "iib": ("IIB Insurance (IRDAI)", [sys.executable, os.path.join(ROOT_DIR, "backend", "IIB", "iib_service.py")], b_config.PORT_IIB),
+    "vahan": ("MoRTH VAHAN Registry", [sys.executable, os.path.join(ROOT_DIR, "backend", "VAHAN", "vahan_service.py")], b_config.PORT_VAHAN),
+    "police": ("Police CCTNS & RVSF", [sys.executable, os.path.join(ROOT_DIR, "backend", "POLICE_CCTNS", "cctns_service.py")], b_config.PORT_POLICE),
+    "anpr": ("Traffic ANPR Network", [sys.executable, os.path.join(ROOT_DIR, "backend", "ANPR_CAMERA", "anpr_service.py")], b_config.PORT_ANPR),
+    "echallan": ("MoRTH e-Challan Portal", [sys.executable, os.path.join(ROOT_DIR, "backend", "ECHALLAN", "echallan_service.py")], b_config.PORT_ECHALLAN),
+    "mediator": ("Central Mediator (Global Schema)", [sys.executable, os.path.join(ROOT_DIR, "backend", "mediator_app.py")], b_config.PORT_MEDIATOR),
+    "frontend": ("Frontend Web Application", [sys.executable, os.path.join(ROOT_DIR, "frontend", "server.py")], b_config.PORT_FRONTEND),
+}
 
-if is_remote:
-    SERVICES = [
-        ("Central Mediator (Global Schema)", [sys.executable, os.path.join(ROOT_DIR, "backend", "mediator_app.py")], 5001),
-        ("Frontend Web Application", [sys.executable, os.path.join(ROOT_DIR, "frontend", "server.py")], 3000),
-    ]
+# Which services run on THIS laptop:
+#   python start_system.py                              everything (one laptop)
+#   python start_system.py --services vahan,iib         only these (e.g. the agency laptops of the 4-laptop demo)
+# Without --services and with REMOTE_HOST set, only the Mediator and the frontend start (old two-laptop mode).
+_args = sys.argv[1:]
+if "--services" in _args and _args.index("--services") + 1 < len(_args):
+    _wanted = [x.strip().lower() for x in _args[_args.index("--services") + 1].split(",") if x.strip()]
+    _unknown = [x for x in _wanted if x not in ALL_SERVICES]
+    if _unknown:
+        print(f"Unknown service(s): {', '.join(_unknown)}. Choose from: {', '.join(ALL_SERVICES)}")
+        sys.exit(2)
+elif b_config.DEFAULT_HOST not in ("127.0.0.1", "localhost"):
+    _wanted = ["mediator", "frontend"]
 else:
-    SERVICES = [
-        ("IIB Insurance (IRDAI)", [sys.executable, os.path.join(ROOT_DIR, "backend", "IIB", "iib_service.py")], 5002),
-        ("MoRTH VAHAN Registry", [sys.executable, os.path.join(ROOT_DIR, "backend", "VAHAN", "vahan_service.py")], 5003),
-        ("Police CCTNS & RVSF", [sys.executable, os.path.join(ROOT_DIR, "backend", "POLICE_CCTNS", "cctns_service.py")], 5004),
-        ("Traffic ANPR Network", [sys.executable, os.path.join(ROOT_DIR, "backend", "ANPR_CAMERA", "anpr_service.py")], 5005),
-        ("MoRTH e-Challan Portal", [sys.executable, os.path.join(ROOT_DIR, "backend", "ECHALLAN", "echallan_service.py")], 5006),
-        ("Central Mediator (Global Schema)", [sys.executable, os.path.join(ROOT_DIR, "backend", "mediator_app.py")], 5001),
-        ("Frontend Web Application", [sys.executable, os.path.join(ROOT_DIR, "frontend", "server.py")], 3000),
-    ]
+    _wanted = list(ALL_SERVICES)
+is_remote = "mediator" in _wanted and not all(k in _wanted for k in ("iib", "vahan", "police", "anpr", "echallan"))
+SERVICES = [ALL_SERVICES[k] for k in ALL_SERVICES if k in _wanted]
 
 processes = []
 
@@ -97,10 +105,13 @@ def main():
     print("🛡️  VAHANRAKSHAK: DISTRIBUTED VEHICLE COMPLIANCE SYSTEM")
     print("   Information Integration & Analytics (IIA) Architecture")
     print("=" * 75)
+    print(f"  Services on this laptop: {', '.join(_wanted)}")
     if is_remote:
-        print(f"  🌐 REMOTE DATABASE MODE ACTIVE -> Host: http://{b_config.DEFAULT_HOST}")
-        print("     Federating 5 database microservices over LAN!")
-        print("=" * 75)
+        print("  Agency databases are reached over the LAN:")
+        for key, url in (("iib", b_config.URL_IIB), ("vahan", b_config.URL_VAHAN), ("police", b_config.URL_POLICE),
+                         ("anpr", b_config.URL_ANPR), ("echallan", b_config.URL_ECHALLAN)):
+            print(f"     {key:<9} {url}{'   (this laptop)' if key in _wanted else ''}")
+    print("=" * 75)
 
     # Pre-flight check: ensure ports are free
     free_ports()
