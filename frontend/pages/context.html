@@ -37,81 +37,84 @@
   </header>
 
   <main class="content-area">
-    <div class="glass-card" style="margin-bottom:1.5rem;">
-      <h2 style="font-size:1.5rem; font-weight:800;">🧭 Federated Context Discovery &amp; Document Integration</h2>
-      <p style="font-size:0.85rem; color:var(--text-muted); max-width:900px; line-height:1.5; margin-bottom:1rem;">
-        The query is split into sub-queries and sent to all five agency databases, each on its own machine.
-        Every database follows its own FK → PK relationships to discover the context around the query and returns
-        its most relevant facts plus the keys that lead into other databases (an owner id, an FIR number…).
-        The Mediator sends those keys to the databases that hold them in the next round, and keeps only the facts
-        closely related to the query. That context then drives the search of the unstructured documents (FIR
-        narratives, surveyor reports, news, tip-offs, officer notes), and what the documents say is checked against
-        what the databases say.
+    <div class="glass-card ctx-hero">
+      <h2>🧭 Federated Context Discovery &amp; Document Integration</h2>
+      <p class="ctx-lead">
+        One question goes to five agency databases on different machines. Each database follows its own FK → PK links
+        to find the context around the query; the Mediator chains the keys they return across databases, keeps only what
+        is related, and uses that context to find and integrate the free-text documents.
       </p>
-      <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
-        <input id="ctx-query" class="search-input" style="flex:1; min-width:320px;"
-               placeholder="e.g. Is DL01AB1004 stolen? any insurance claim?" autocomplete="off">
-        <select id="ctx-method" class="search-input" style="width:auto;" title="Document search method">
+      <div class="ctx-searchbar">
+        <input id="ctx-query" class="search-input" placeholder="e.g. Is DL01AB1004 stolen? any insurance claim?" autocomplete="off">
+        <select id="ctx-method" class="search-input" title="Document search method">
           <option value="context_entities">Docs: context + entities (selected by measurement)</option>
           <option value="bm25_context">Docs: BM25 on context terms</option>
           <option value="bm25_query">Docs: BM25 on query words only</option>
         </select>
         <button id="ctx-run" class="btn btn-primary">Discover context</button>
       </div>
-      <div id="ctx-examples" style="margin-top:0.6rem; display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.8rem;">
-        <span style="color:var(--text-muted);">Try:</span>
-      </div>
+      <div id="ctx-examples" class="ctx-examples"><span>Try:</span></div>
+      <ol class="ctx-pipeline" id="ctx-pipeline">
+        <li data-step="1"><b>Query → sub-query</b><span>keys, terms, noisy plates resolved</span></li>
+        <li data-step="2"><b>Federate</b><span>5 databases · FK → PK walk · key chaining</span></li>
+        <li data-step="3"><b>Context</b><span>relevance × SCORE POP·DIFF</span></li>
+        <li data-step="4"><b>Documents</b><span>context-driven search</span></li>
+        <li data-step="5"><b>Integrate</b><span>timeline · leads · conflicts</span></li>
+      </ol>
     </div>
 
-    <div id="ctx-error" class="glass-card" style="display:none; border-color:#fecaca; color:#b91c1c; margin-bottom:1.5rem;"></div>
+    <div id="ctx-error" class="glass-card ctx-error" style="display:none;"></div>
+    <div id="ctx-loading" class="glass-card ctx-loading" style="display:none;"><span class="ctx-spinner"></span> Federating the query to the agency databases…</div>
 
     <div id="ctx-result" style="display:none;">
-      <div class="ctx-grid">
-        <div class="glass-card">
-          <h3 class="ctx-h">1. Query → sub-query</h3>
-          <div id="ctx-parsed"></div>
-        </div>
-        <div class="glass-card">
-          <h3 class="ctx-h">Accumulated context</h3>
-          <div id="ctx-summary"></div>
-        </div>
-      </div>
+      <div class="stats-grid" id="ctx-stats"></div>
 
-      <div class="glass-card" style="margin:1.5rem 0;">
-        <h3 class="ctx-h">Integrated answer <span class="ctx-sub">databases' answers + what the documents add or contradict</span></h3>
+      <section class="glass-card ctx-section">
+        <h3 class="ctx-h"><span class="ctx-step">5</span> Integrated answer <span class="ctx-sub">what the databases say + what the documents add or contradict</span></h3>
         <div id="ctx-integrated"></div>
+      </section>
+
+      <div class="ctx-grid">
+        <section class="glass-card ctx-section">
+          <h3 class="ctx-h"><span class="ctx-step">1</span> Query → sub-query</h3>
+          <div id="ctx-parsed"></div>
+        </section>
+        <section class="glass-card ctx-section">
+          <h3 class="ctx-h"><span class="ctx-step">3</span> Accumulated context</h3>
+          <div id="ctx-summary"></div>
+        </section>
       </div>
 
-      <div class="glass-card" style="margin-bottom:1.5rem;">
-        <h3 class="ctx-h">5. Related documents <span class="ctx-sub" id="ctx-doc-meta"></span></h3>
+      <section class="glass-card ctx-section">
+        <h3 class="ctx-h"><span class="ctx-step">2</span> Federation rounds <span class="ctx-sub">each agency answers from its own machine</span></h3>
+        <div id="ctx-rounds"></div>
+      </section>
+
+      <section class="glass-card ctx-section">
+        <h3 class="ctx-h"><span class="ctx-step">3</span> Context entities <span class="ctx-sub">relevance of the best fact · TW = SCORE term weight POP·DIFF (frequent in the result, rare in the database)</span></h3>
+        <div id="ctx-entities"></div>
+        <details class="ctx-details">
+          <summary>Discovered facts <span class="ctx-sub">relevance = hop decay × (1 + 0.5 × query terms) × round decay</span></summary>
+          <div id="ctx-facts"></div>
+        </details>
+      </section>
+
+      <section class="glass-card ctx-section">
+        <h3 class="ctx-h"><span class="ctx-step">4</span> Related documents <span class="ctx-sub" id="ctx-doc-meta"></span></h3>
         <div id="ctx-docs"></div>
-        <details style="margin-top:1rem;">
-          <summary style="cursor:pointer; color:var(--accent-primary); font-size:0.85rem;">➕ Add a document (e.g. a new tip-off) — searchable immediately</summary>
-          <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.6rem;">
-            <select id="doc-type" class="search-input" style="width:auto;">
+        <details class="ctx-details ctx-add">
+          <summary>➕ Add a document (e.g. a new tip-off): searchable immediately, linked to the database entities it mentions</summary>
+          <div class="ctx-add-form">
+            <select id="doc-type" class="search-input">
               <option value="TIP_OFF">Tip-off (public)</option><option value="NEWS">News (public)</option>
               <option value="OFFICER_NOTE">Officer note (police)</option><option value="SURVEYOR_REPORT">Surveyor report (insurer)</option>
             </select>
             <textarea id="doc-body" class="search-input" rows="3" placeholder="e.g. Tip-off: a blue Nexon DL 01 AB 1OO4 has been parked near Banjara Hills, Hyderabad since 13 Sep 2026; looks like the stolen one."></textarea>
-            <div><button id="doc-add" class="btn btn-secondary btn-sm">Add document</button> <span id="doc-add-msg" style="font-size:0.8rem;"></span></div>
+            <div><button id="doc-add" class="btn btn-secondary btn-sm">Add document</button> <span id="doc-add-msg" class="ctx-add-msg"></span></div>
+            <div id="doc-linked"></div>
           </div>
         </details>
-      </div>
-
-      <div class="glass-card" style="margin:1.5rem 0;">
-        <h3 class="ctx-h">2. Federation rounds <span class="ctx-sub">each agency answers from its own machine</span></h3>
-        <div id="ctx-rounds"></div>
-      </div>
-
-      <div class="glass-card" style="margin-bottom:1.5rem;">
-        <h3 class="ctx-h">3. Context entities <span class="ctx-sub">weight = relevance of the best fact they come from</span></h3>
-        <div id="ctx-entities"></div>
-      </div>
-
-      <div class="glass-card">
-        <h3 class="ctx-h">4. Discovered facts <span class="ctx-sub">relevance = hop decay × (1 + 0.5 × query terms) × round decay</span></h3>
-        <div id="ctx-facts"></div>
-      </div>
+      </section>
     </div>
   </main>
 

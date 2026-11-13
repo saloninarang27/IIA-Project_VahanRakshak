@@ -36,6 +36,8 @@ async function runContext() {
   btn.disabled = true;
   btn.textContent = 'Federating…';
   err.style.display = 'none';
+  document.getElementById('ctx-loading').style.display = 'flex';
+  document.querySelectorAll('#ctx-pipeline li').forEach(li => { li.classList.remove('done'); li.querySelector('em')?.remove(); });
   try {
     const { ok, data } = await API.discoverContext(query, document.getElementById('ctx-method').value);
     if (!ok || data.status === 'error') throw new Error(data.error || 'Context discovery failed');
@@ -47,6 +49,7 @@ async function runContext() {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Discover context';
+    document.getElementById('ctx-loading').style.display = 'none';
   }
 }
 
@@ -54,8 +57,40 @@ function chips(list, fmt) {
   return (list || []).map(x => `<span class="ctx-chip">${fmt(x)}</span>`).join('') || '<span style="color:var(--text-muted)">—</span>';
 }
 
+function stat(label, value, sub, cls = 'info') {
+  return `<div class="stat-card ${cls}"><div class="stat-label">${label}</div><div class="stat-value">${value}</div><div class="stat-subtext">${sub}</div></div>`;
+}
+
+function renderOverview(d) {
+  const answered = d.rounds.reduce((n, r) => n + r.agencies.filter(a => a.status === 200).length, 0);
+  const sent = d.rounds.reduce((n, r) => n + r.agencies.length, 0);
+  const machines = new Set(d.rounds.flatMap(r => r.agencies.map(a => (a.endpoint.match(/\/\/([^/]+)/) || [])[1])));
+  const docs = d.documents || {};
+  const findings = Object.values(d.integration || {}).reduce((n, i) => n + i.findings.length, 0);
+  const leads = Object.values(d.integration || {}).reduce((n, i) => n + i.findings.filter(f => f.type === 'NEW_LEAD').length, 0);
+  document.getElementById('ctx-stats').innerHTML = [
+    stat('Federation rounds', d.rounds.length, `${answered}/${sent} sub-queries answered`),
+    stat('Agency endpoints', machines.size, `${Object.keys(d.facts_by_agency).length} databases contributed`),
+    stat('Context facts', d.facts.length, `${d.context_terms.length} weighted context terms`, 'success'),
+    stat('Documents searched', docs.searched ?? '—', `${(docs.results || []).length} related returned`),
+    stat('Findings', findings, leads ? `${leads} new lead(s)` : 'documents vs databases', findings ? 'warning' : 'success'),
+  ].join('');
+  const notes = {
+    1: Object.values(d.parsed.seeds).flat().length + ' seed key(s)',
+    2: `${d.rounds.length} round(s) · ${answered} answers`,
+    3: `${d.facts.length} facts · ${d.context_terms.length} terms`,
+    4: docs.status === 200 ? `${(docs.results || []).length} of ${docs.searched}` : 'store offline',
+    5: `${findings} finding(s)`,
+  };
+  document.querySelectorAll('#ctx-pipeline li').forEach(li => {
+    li.classList.add('done');
+    li.insertAdjacentHTML('beforeend', `<em>${notes[li.dataset.step]}</em>`);
+  });
+}
+
 function render(d) {
   document.getElementById('ctx-result').style.display = 'block';
+  renderOverview(d);
   renderIntegrated(d);
   renderDocuments(d.documents);
   const p = d.parsed;
@@ -104,7 +139,7 @@ function render(d) {
     </div>`).join('');
 
   document.getElementById('ctx-entities').innerHTML = `<dl class="ctx-kv">${Object.entries(d.entities).map(([g, items]) =>
-    `<dt>${esc(g.replace('_', ' '))}</dt><dd>${chips(items.slice(0, 12), i => `${esc(i.value)}<b>${i.weight}</b>`)}</dd>`).join('')}</dl>`;
+    `<dt>${esc(g.replace('_', ' '))}</dt><dd>${chips(items.slice(0, 12), i => `${esc(i.value)}<b>${i.weight}</b>${i.tw != null ? `<b class="tw" title="SCORE term weight POP·DIFF">TW ${i.tw}</b>` : ''}`)}</dd>`).join('')}</dl>`;
 
   document.getElementById('ctx-facts').innerHTML = `<div class="table-container"><table class="data-table">
     <thead><tr><th>Score</th><th>Agency</th><th>Fact</th><th>Found via (FK → PK)</th><th>Round / hop</th><th>Data</th></tr></thead><tbody>
@@ -148,13 +183,17 @@ function renderIntegrated(d) {
       ['Risk', v.risk_level]];
     const findings = i.findings.length ? i.findings.map(f => {
       const [cls, label] = FINDING_STYLE[f.type] || ['badge-info', f.type];
-      return `<div style="margin:0.25rem 0; font-size:0.83rem;"><span class="badge ${cls}">${label}</span> ${esc(f.detail)} <a href="#doc-${f.doc_id}" style="font-size:0.75rem;">doc #${f.doc_id}</a></div>`;
+      const tone = cls === 'badge-danger' ? 'danger' : cls === 'badge-warning' ? 'warning' : '';
+      return `<div class="ctx-finding ${tone}"><span class="badge ${cls}">${label}</span> ${esc(f.detail)} <a href="#doc-${f.doc_id}">doc #${f.doc_id}</a></div>`;
     }).join('') : '<span style="color:var(--text-muted); font-size:0.83rem;">The documents agree with the databases.</span>';
-    const timeline = i.timeline.map(t => `<tr${t.origin === 'document' ? ' style="background:#fffbeb"' : ''}>
+    const timeline = i.timeline.map(t => `<tr${t.origin === 'document' ? ' class="from-doc"' : ''}>
       <td class="mono">${esc(t.date)}</td><td>${esc(t.event.replace(/_/g, ' '))}</td><td>${esc(t.detail)}</td>
       <td>${t.origin === 'document' ? '📄 ' : '🗄️ '}${esc(t.source)}</td></tr>`).join('');
-    return `<div style="border:1px solid #e2e8f0; border-radius:8px; padding:0.9rem; margin-bottom:1rem;">
-      <div style="font-weight:700; font-family:var(--font-mono); margin-bottom:0.5rem;">${esc(p)} <span style="font-weight:400; color:var(--text-muted); font-family:inherit; font-size:0.8rem;">${i.documents.length} document(s) about this vehicle</span></div>
+    const riskCls = { HIGH: 'badge-danger', CRITICAL: 'badge-danger', MEDIUM: 'badge-warning', LOW: 'badge-success' }[String(v.risk_level || '').toUpperCase()] || 'badge-info';
+    return `<div class="ctx-vehicle">
+      <div class="ctx-vehicle-head"><span class="plate">${esc(p)}</span>
+        ${v.risk_level ? `<span class="badge ${riskCls}">risk ${esc(v.risk_level)}</span>` : ''}
+        <span class="ctx-sub">${i.documents.length} document(s) about this vehicle</span></div>
       <div class="ctx-grid" style="gap:1rem;">
         <dl class="ctx-kv">${kv.map(([k, val]) => `<dt>${k}</dt><dd>${esc(val ?? '—')}</dd>`).join('')}</dl>
         <div><div style="font-weight:600; font-size:0.85rem; margin-bottom:0.3rem;">Findings from the documents</div>${findings}</div>
@@ -176,9 +215,10 @@ function renderDocuments(docs) {
   meta.textContent = `${docs.method} · searched ${docs.searched} documents at ${docs.endpoint.replace('/api/v1/search', '')}` +
     (docs.hidden_by_role ? ` · ${docs.hidden_by_role} not visible to your role` : '') + ` · ${docs.latency_ms} ms`;
   const ctx = docs.search_context || {};
-  const ctxLine = `<div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.6rem;">Searched with: plates ${esc((ctx.plates || []).join(', ') || '—')} ·
+  const ctxLine = `<div class="ctx-searched">Searched with: plates ${esc((ctx.plates || []).join(', ') || '—')} ·
     ids ${esc((ctx.ids || []).join(', ') || '—')} · places ${esc((ctx.cities || []).join(', ') || '—')} · vehicle ${esc((ctx.vehicle_words || []).join(' ') || '—')}
     · ${(ctx.terms || []).length} weighted context terms</div>`;
+  const top = Math.max(...docs.results.map(r => r.score), 1e-9);
   box.innerHTML = ctxLine + (docs.results.length ? docs.results.map((r, n) => {
     const b = r.breakdown || {};
     const parts = [`text ${b.text}`];
@@ -188,14 +228,14 @@ function renderDocuments(docs) {
       if (b.places && b.places.length) parts.push(`place ${esc(b.places.join(', '))}`);
       if (b.dates && b.dates.length) parts.push(`date ${esc(b.dates.join(', '))}`);
     }
-    return `<div id="doc-${r.doc_id}" style="border-bottom:1px dashed #e2e8f0; padding:0.55rem 0;">
-      <div style="display:flex; justify-content:space-between; gap:1rem;">
+    return `<div id="doc-${r.doc_id}" class="ctx-doc">
+      <div class="ctx-doc-head">
         <div><b>#${n + 1}</b> <span class="ctx-agency-tag">${esc(r.doc_type.replace('_', ' '))}</span> <b>${esc(r.title)}</b>
-          <span style="color:var(--text-muted); font-size:0.78rem;">· ${esc(r.source)} · ${esc(r.published_on)} · doc #${r.doc_id}</span></div>
-        <div style="white-space:nowrap;"><b>${r.score}</b></div>
+          <span class="ctx-doc-meta">· ${esc(r.source)} · ${esc(r.published_on)} · doc #${r.doc_id}</span></div>
+        <div class="ctx-score"><span class="ctx-score-bar"><i style="width:${Math.round(100 * r.score / top)}%"></i></span>${r.score}</div>
       </div>
-      <div style="font-size:0.83rem; margin:0.25rem 0;">${marked(r.snippet)}</div>
-      <div style="font-size:0.72rem; color:var(--text-muted);">score = ${parts.join(' · ')}</div>
+      <div class="ctx-doc-text">${marked(r.snippet)}</div>
+      <div class="ctx-doc-why">score = ${parts.join(' · ')}</div>
     </div>`;
   }).join('') : '<span style="color:var(--text-muted)">No matching documents.</span>');
 }
@@ -207,5 +247,14 @@ async function addDocument() {
   const { ok, data } = await API.addDocument({ doc_type: document.getElementById('doc-type').value, body });
   msg.textContent = ok ? `Added as doc #${data.doc_id} (${data.visibility}). Running the query again…` : (data.error || 'Failed');
   msg.style.color = ok ? '#047857' : '#b91c1c';
+  const L = ok && data.linked_entities;
+  document.getElementById('doc-linked').innerHTML = L ? `<div class="ctx-linked">
+    <b>Database entities this document discusses</b> <span class="ctx-sub">document → database (EROCS direction)</span>
+    <dl class="ctx-kv" style="margin-top:0.4rem;">
+      <dt>Vehicles</dt><dd>${chips(L.vehicles, esc)}${(L.plate_resolution || []).map(r => `<div class="ctx-sub" style="margin:0.2rem 0 0;">🧩 “${esc(r.query_plate)}” → ${esc(r.resolved_to)} (${esc(r.rule)})</div>`).join('')}</dd>
+      <dt>FIR / policy / claim</dt><dd>${chips([...L.firs, ...L.policies, ...L.claims], esc)}</dd>
+      <dt>Places · dates</dt><dd>${chips([...L.cities, ...L.dates], esc)}</dd>
+      <dt>Events</dt><dd>${chips(L.events, esc)}</dd>
+    </dl></div>` : '';
   if (ok && document.getElementById('ctx-query').value.trim()) runContext();
 }
