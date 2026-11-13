@@ -10,6 +10,7 @@ Directly maps to Project A Evaluation Rubric (15 Marks):
   7. Communication Between Data Sources (2 marks)
   8. Query Results Integration & Presentation (3 marks)
 """
+import json
 import unittest
 import sqlite3
 import os
@@ -66,7 +67,12 @@ class TestEvaluationRubric(unittest.TestCase):
         self.assertLess(data2["query_latency_ms"], 10.0)
 
         # 3. Webhook Invalidation
-        res_inv = self.mediator.post("/api/v1/sync/invalidate", json={"vehicle_identifier": "DL01AB1001"})
+        # (the webhook is a signed service call from the e-Challan service, not a user request)
+        from backend import security
+        body = json.dumps({"vehicle_identifier": "DL01AB1001"}).encode()
+        res_inv = self.mediator.post("/api/v1/sync/invalidate", data=body, content_type="application/json",
+                                     headers=security.signed_headers("POST", "/api/v1/sync/invalidate", body,
+                                                                     "ADMIN", "echallan"))
         self.assertEqual(res_inv.status_code, 200)
         self.assertEqual(res_inv.get_json()["status"], "CACHE_PURGED")
 
