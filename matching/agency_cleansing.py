@@ -57,11 +57,9 @@ def _q(value):
 def http_sql_runner(source_key, query):
     """Execute SQL on an agency database via its service's /internal/execute-sql endpoint."""
     source = SOURCES_BY_KEY[source_key]
-    req = urllib.request.Request(
-        source["base_url"] + "/api/v1/internal/execute-sql",
-        data=json.dumps({"query": query}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-    )
+    from backend.security import signed_request
+    # Batch cleansing is an ADMIN job (the Mediator only runs it for an ADMIN session).
+    req = signed_request(source["base_url"] + "/api/v1/internal/execute-sql", "POST", {"query": query}, role="ADMIN")
     try:
         with urllib.request.urlopen(req, timeout=10.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))

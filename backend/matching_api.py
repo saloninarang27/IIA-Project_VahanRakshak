@@ -1,11 +1,12 @@
 """
 Approximate Vehicle Matching & Data Cleansing API (Mediator blueprint, /api/v1/matching).
 
-The reference index is federated from ALL FIVE agency microservices (VAHAN, IIB,
-Police, ANPR, e-Challan), fetched in parallel through the Mediator's fetcher, merged
-by normalised plate (matching/sources.py) and cached for CACHE_TTL_SECONDS. Each
-candidate records which databases hold it. A service that is unreachable falls back
-to its local replica file, or is reported as unavailable.
+Plate searches (POST /search and the "did you mean" suggestions) are pushed down:
+every agency matches the plate against its own records and returns only candidates
+(matching/sources.py: fetch_candidate_rows), so a user search never moves a whole
+plate list. The full five-database index is built only for the ADMIN batch jobs
+(cleansing, evaluation, agency scan), and the Mediator only allows those for an
+ADMIN session. Each candidate records which databases hold it.
 
 Endpoints:
     GET  /config                       methods, thresholds, decision rules, OCR engines
@@ -31,11 +32,11 @@ import threading
 import time
 from datetime import datetime
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
 
 import backend.config as config
 from matching import store, agency_cleansing
-from matching.sources import fetch_source_rows, build_reference_index, source_summary
+from matching.sources import fetch_source_rows, fetch_candidate_rows, build_reference_index, source_summary
 from matching.cleansing import assess_record, RULES, CORRECTION_THRESHOLD, OCR_ONLY_CORRECTION_THRESHOLD, AMBIGUITY_MARGIN
 from matching.context import CONTEXT_ATTRIBUTES
 from matching.evaluation import run_evaluation, evaluate_cleansing
@@ -79,7 +80,7 @@ def get_reference_index(force=False):
         if _index_cache["vehicles"] is not None and fresh and not force:
             return _index_cache["vehicles"]
 
-        source_rows = fetch_source_rows(_fetch)
+        source_rows = fetch_source_rows(_fetch, role="ADMIN")
         vehicles = build_reference_index(source_rows)
         if not vehicles:
             raise IndexUnavailable("None of the five agency databases is reachable, and no local replica exists.")
@@ -96,6 +97,26 @@ def get_reference_index(force=False):
             "sources": sources,
         })
         return vehicles
+
+
+def candidate_index(plate, threshold=DEFAULT_CANDIDATE_THRESHOLD, method=DEFAULT_METHOD):
+    """
+    Index of only the vehicles whose plate is a candidate for `plate`, asked from each agency
+    (push-down). assess_record on it gives the same decision as on the full index, because
+    it only ever considers candidates at or above the threshold.
+    """
+    role = g.get("role") or "ADMIN"
+    source_rows = fetch_candidate_rows(_fetch, plate, threshold, method, role)
+    sources = source_summary(source_rows, [])
+    if all(s["via"] == "UNAVAILABLE" for s in sources):
+        raise IndexUnavailable("None of the five agency databases is reachable.")
+    live = sum(1 for s in sources if s["via"] == "API")
+    vehicles = build_reference_index(source_rows)
+    meta = {"size": len(vehicles), "mode": "PUSH_DOWN (each agency returns only its candidates)",
+            "source": "ALL_SOURCES_API" if live == len(sources) else f"PARTIAL ({live}/{len(sources)} live)",
+            "sources": source_summary(source_rows, vehicles),
+            "loaded_at": datetime.now().isoformat(sep=" ", timespec="seconds")}
+    return vehicles, meta
 
 
 def _vahan_index():
@@ -141,7 +162,8 @@ def _record_input(record):
 
 def suggest_matches(plate, limit=5):
     """Used by the vehicle lookup: approximate matches for a plate VAHAN does not know (all five databases searched)."""
-    assessment = assess_record({"plate": plate}, get_reference_index())
+    vehicles, _ = candidate_index(plate)
+    assessment = assess_record({"plate": plate}, vehicles)
     return {
         "decision": assessment["decision"],
         "decision_status": assessment["decision_status"],
@@ -168,7 +190,8 @@ def _bad_request(e):
 # ---------------------------------------------------------------------------
 @matching_bp.route("/config", methods=["GET"])
 def matching_config():
-    get_reference_index()
+    if g.get("role") == "ADMIN":
+        get_reference_index()  # only an ADMIN session may cause the full index to be built
     return jsonify({
         "default_method": DEFAULT_METHOD,
         "methods": [{"key": k, "label": METHOD_LABELS[k]} for k in METHODS],
@@ -181,7 +204,8 @@ def matching_config():
         "context_attributes": [{"attribute": a, "weight": w} for a, w in CONTEXT_ATTRIBUTES],
         "rules": RULES,
         "ocr_engines": available_engines(),
-        "index": _index_meta(),
+        "index": _index_meta() if g.get("role") == "ADMIN" else
+                 {"mode": "PUSH_DOWN", "size": None, "sources": [], "source": None, "loaded_at": None},
     })
 
 
@@ -213,9 +237,10 @@ def search():
 
     started = time.time()
     record = {"plate": body.get("plate"), **{a: (body.get(a) or None) for a, _ in CONTEXT_ATTRIBUTES}}
-    assessment = assess_record(record, get_reference_index(), method, threshold=threshold, max_candidates=limit)
+    vehicles, meta = candidate_index(record["plate"], threshold, method)
+    assessment = assess_record(record, vehicles, method, threshold=threshold, max_candidates=limit)
     assessment["latency_ms"] = round((time.time() - started) * 1000, 1)
-    assessment["index"] = _index_meta()
+    assessment["index"] = meta
     if body.get("ocr"):
         assessment["ocr"] = body["ocr"]
 
