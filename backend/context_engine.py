@@ -15,6 +15,15 @@ POST /api/v1/context  {"seeds": {"plate": [...], "owner_id": [...], "fir_no": [.
    so rows close to the seed and about what the user asked rank first.
 4. Return the top facts, plus the cross-database keys found in them (an owner id, an FIR number,
    another plate ...) so the Mediator can continue in the databases that hold those keys.
+5. SCORE term weights (Roy et al.): for every short text value t in column A of a returned fact,
+       TW(t) = POP * DIFF,  POP = NQ,  DIFF = log10((1 + NR) / (1 + NR - NQ))
+   NQ = rows reached by this query (the FK-augmented result) with A = t, NR = rows of the whole table
+   with A = t. A value frequent in the result but rare in the database (this car's plate, its FIR)
+   gets a high weight; a value common everywhere (a big city, a popular make) gets almost none.
+   A value of a parent (dimension) table is counted through the FK join, as in SCORE's augmented
+   query AQ = Q JOIN_FK R: "Tata" in vehicle_model is one row, but hundreds of registrations join
+   to it, so it is common and weighs little. Only the agency can count NR in its own database, so
+   this is computed here (push-down).
 
 Need-to-know: a table the caller's role may not see is still walked through (so its keys can
 lead on), but its facts come back with only the key columns ("redacted": true). Personal fields
@@ -24,6 +33,8 @@ The per-agency description below (CONTEXT_SPECS) says which columns accept which
 types and which columns export which cross-database key types: it is each agency's published
 "context interface", the counterpart of the identifier map in matching/sources.py.
 """
+import math
+
 from flask import g, jsonify, request
 
 HOP_DECAY = {0: 1.0, 1: 0.6, 2: 0.35, 3: 0.2}
@@ -115,6 +126,51 @@ def _term_hits(row, terms):
     return [t for t in terms if t in text]
 
 
+def score_tw(nq, nr):
+    """SCORE term weight: POP * DIFF = NQ * log10((1 + NR) / (1 + NR - NQ)). Lecture example: NQ=3, NR=4 -> 1.194."""
+    return round(nq * math.log10((1 + nr) / (1 + nr - nq)), 3)
+
+
+def _score_term_weights(conn, nodes, facts, edges):
+    """TW = POP * DIFF for the short text values of the returned (unredacted) facts. See step 5."""
+    wanted = {}
+    for f in facts:
+        if f["redacted"]:
+            continue
+        for col, v in f["row"].items():
+            if isinstance(v, str) and 2 <= len(v) <= 40 and "*" not in v:
+                wanted.setdefault((f["table"], col), set()).add(v)
+    reached = {}
+    for n in nodes.values():
+        reached.setdefault(n["table"], []).append(n["row"])
+    tw = {}
+    for (table, col), values in wanted.items():
+        marks = ",".join("?" * len(values))
+        # count in the augmented relation: through an FK from a reached child table, else in the table itself
+        edge = next(((c, cc, pc) for c, cc, p, pc in edges if p == table and c in reached and c != table), None)
+        if edge:
+            child, ccol, pcol = edge
+            keys = {}
+            for v, k in conn.execute(f'SELECT "{col}", "{pcol}" FROM "{table}" WHERE "{col}" IN ({marks})', list(values)):
+                keys.setdefault(v, set()).add(k)
+            nr = {v: conn.execute(f'SELECT COUNT(*) FROM "{child}" WHERE "{ccol}" IN ({",".join("?" * len(ks))})',
+                                  list(ks)).fetchone()[0] for v, ks in keys.items()}
+            nq = {v: sum(1 for r in reached[child] if r.get(ccol) in ks) for v, ks in keys.items()}
+        else:
+            nr = dict(conn.execute(f'SELECT "{col}", COUNT(*) FROM "{table}" WHERE "{col}" IN ({marks}) GROUP BY "{col}"',
+                                   list(values)).fetchall())
+            nq = {}
+            for r in reached.get(table, []):
+                if r.get(col) in values:
+                    nq[r[col]] = nq.get(r[col], 0) + 1
+        for v, r in nr.items():
+            q = min(max(nq.get(v, 0), 1), r) if r else 0
+            if q:
+                tw[(table, col, v)] = score_tw(q, r)
+    for f in facts:
+        f["term_weights"] = {c: tw[(f["table"], c, v)] for c, v in f["row"].items() if (f["table"], c, v) in tw}
+
+
 def discover(conn, agency, seeds, terms, role, max_hops=2, limit=30):
     spec = CONTEXT_SPECS[agency]
     tables, edges = fk_graph(conn)
@@ -194,10 +250,12 @@ def discover(conn, agency, seeds, terms, role, max_hops=2, limit=30):
         facts.append({"agency": agency, "table": table, "label": spec["labels"].get(table, table), "hop": hop,
                       "via": node["via"], "score": score, "matched_terms": hits, "redacted": redacted, "row": data})
     facts.sort(key=lambda f: (-f["score"], f["hop"], f["table"]))
+    facts = facts[:limit]
+    _score_term_weights(conn, nodes, facts, edges)
     return {
         "agency": agency,
         "accepts": sorted(spec["seeds"]),
-        "facts": facts[:limit],
+        "facts": facts,
         "keys": {k: [{"value": v, "score": s} for v, s in sorted(vals.items(), key=lambda x: -x[1])] for k, vals in keys.items()},
         "stats": {"seed_rows": sum(1 for n in nodes.values() if n["hop"] == 0), "rows_reached": len(nodes),
                   "tables_reached": sorted({n["table"] for n in nodes.values()}), "fk_edges": len(edges),
