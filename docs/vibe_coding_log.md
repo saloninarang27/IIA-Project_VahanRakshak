@@ -1,151 +1,252 @@
-# Vibe-Coding Log: Prompts, Generated Code and Our Changes (Phase 2, rubric item 3)
+# Vibe-Coding Log: Prompts, Generated Code and Our Changes
 
-This log covers the phase-2 work (approximate matching and data cleansing). For each step it records the prompt we
-gave the AI assistant (Claude Code), the code it generated (with the git commit) and the changes **we** made.
+**Project:** VehicleSentinel: identification of uninsured vehicles on the road (IIA Project A).
+**Team:** Aastha Kalbhor (MT25007), Aniket Raj Singh (MT25015), Anurag Sharma (MT25063), Saloni (MT25081).
+**Assistant:** Claude Code.
 
-> **Team: complete the sections marked ✍️.** The assistant could only write down what it did and what you asked for.
-> The "our changes" sections must come from you: what you edited by hand, and why.
+For every phase this log records:
+1. the **prompt** we gave the assistant, written up as a clear task statement (the conversations themselves were
+   longer and more back-and-forth);
+2. what was **generated**, with its git commit;
+3. **our changes**: commits we made ourselves, and the corrections we asked the assistant to make after reviewing
+   its output.
 
-## How to show the changes in the evaluation
+## How to show the changes during the evaluation
 
 ```bash
-git log --oneline c4f28cf..HEAD                    # every phase-2 commit
-git show --stat be12293                            # files one step generated
-git diff be12293 HEAD -- matching/cleansing.py     # how a generated file changed afterwards
-git log -p --follow -- matching/ocr.py             # full history of one file
+git log --format='%h %ad %an  %s' --date=short     # who committed what, and when
+git show --stat <commit>                            # files one step touched
+git diff <generated-commit> <our-commit> -- <file>  # what we changed in a generated file
+git log -p --follow -- <file>                       # full history of one file
 ```
 
 In VS Code, the *Timeline* view or *GitLens* shows the same diffs with highlighted lines.
 
-## Steps
-
-### Step 1: Approximate matching and data cleansing (commit `be12293`, 49 files, +4,138 / −562)
-
-**Prompt:** the 20-item task list (approximate vehicle matching, items 1–11; data cleansing and integration,
-items 12–20).
-
-**Generated:** the `matching/` package (`normalize`, `similarity`, `matcher`, `context`, `cleansing`,
-`evaluation`, `noisy_records`, `store`, `ocr`), `backend/matching_api.py`, `schemas/data_quality_schema.sql`, the
-🧩 Plate Matching page, sample plate images, `tests/test_matching.py`, `docs/approximate_matching.md`.
-
-**Design decisions made during generation (and why):**
-- The OCR-weighted edit distance was **chosen by measurement**, not assumed: F1 0.877, against 0.704 for Levenshtein
-  and 0.665 for Jaro–Winkler, on 290 labelled queries.
-- The candidate threshold was raised from 0.70 to 0.80 after measuring 1,577 average candidates per query for
-  Jaro–Winkler at 0.70.
-- A test failed (`DL01AB2070` vs `DL01AB2670`). Investigating it showed the two vehicles have identical make, model,
-  colour and type, so the rule engine was right to refuse to choose. The test scenario was relabelled, not the rule.
-- Rule R8 was changed to require that *every* edit is a look-alike-character swap, instead of a similarity threshold.
-- Levenshtein and the OCR distance were optimised (early exit) after the test suite took 98 s. Equivalence with the
-  naive version was checked on 3,000 random string pairs.
-
-**Follow-up prompts in the same step:** "is fuzzy logic is matching?" (answer: fuzzy *matching*, crisp rules);
-"how much code is useless in this project"; "safe cleanup and fix the webhook URL". The cleanup removed the duplicate
-root `schema_matcher.py` and the six unused `backend/*/schema.sql` files, plus an `If-Modified-Since` branch that was
-never implemented (it ended in `pass`). It also fixed the e-Challan webhook, which was hard-coded to `127.0.0.1` and
-so broke two-laptop mode.
-
-✍️ **Our changes:**
-- …
-
-### Step 2: OCR that finds the plate in real photos (commits `6be524e`, `d7c77dd`)
-
-**Prompt:** five photos the application could not read (a Ford rear photo, a Shutterstock plate, an Azerbaijani
-plate, a temporary plate, a New York taxi plate), then screenshots of wrong readings.
-
-**Root causes found:**
-1. OCR treated the whole photo as one line of text, so it mixed in badges, state names and watermarks.
-2. Two copies of the system were running. On Windows both bind the same port, so requests kept reaching the
-   old copy.
-
-**Generated:**
-- RapidOCR as the server engine;
-- plate selection (`select_plate_text`): the tallest uppercase row with digits, split boxes joined, overlapping
-  boxes de-duplicated;
-- the same selection ported to JavaScript for the browser fallback, checked identical on 10 images;
-- a subprocess import check, so a crashing `onnxruntime` build cannot take the Mediator down;
-- `start_system.py` refusing to start when its ports are already in use;
-- `tests/test_plate_ocr.py`.
-
-✍️ **Our changes:**
-- …
-
-### Step 3: Match against all five databases (commit `135ef10`)
-
-**Prompt:** "in plate matching which database exactly you checking? our purpose is to check from all 5 database
-which already created".
-
-**Generated:** `GET /api/v1/identifiers` on IIB, Police, ANPR and e-Challan; `matching/sources.py` (parallel fetch
-and merge of all five plate lists); a "Found in" column per candidate; the `NOT_IN_VAHAN` flag;
-`tests/test_matching_sources.py`.
-
-✍️ **Our changes:**
-- …
-
-### Step 4: Live data cleansing and fixes for the live evaluation (this commit)
-
-**Prompt:** the evaluation notice ("I shall be checking by asking you to insert/delete/modify the data records"),
-then "complete all the tasks".
-
-**Found by testing against the running system:**
-- One `INSERT` in the SQL REPL created **two rows**. The Mediator re-ran every write on its "local copy" of the
-  database, which is the same file when everything runs on one machine.
-- Inserts into IIB, Police, ANPR or e-Challan stayed invisible to matching for up to 5 minutes.
-- Cleansing only worked on the 112 staged test records, never on the real agency data.
-
-**Generated:**
-- the REPL double write removed (the agency service is the only writer);
-- the plate list rebuilt after every REPL write, and its cache cut from 300 s to 15 s;
-- `matching/agency_cleansing.py`: scan → decide → **write back** through each agency's service, with the
-  `dq_agency_corrections` change log;
-- the 🗄️ Agency Data tab and a "Refresh plate list" button;
-- simplifications: one source map (`matching/sources.py`, now also used by `mediator/identifier_mapper.py`),
-  one Levenshtein implementation (schema matching uses the plate-matching one), one plate normaliser in the Mediator;
-- `tests/test_agency_cleansing.py` (12 tests).
-
-✍️ **Our changes:**
-- …
-
-### Step 5: Cleansing with the scanned image as evidence, hermetic tests
-
-**Prompt:** "complete if something missing", with the evaluation rubric pasted (1. image → approximate matches
-and vice-versa with a justified algorithm; 2. cleanse the recorded data w.r.t. the image data and contextual
-information; 3. prompts, generated code and our changes).
-
-**Gaps found by checking the code against the rubric:**
-- Rubric 2 says "w.r.t. the **image** data", but a scanned image was only *searched*. Live cleansing used the
-  attributes stored in the database rows, never the photo.
-- With `.env` pointing at the second laptop (`REMOTE_HOST`), 3 tests failed whenever that laptop was off: the
-  suite tested the remote machine instead of this checkout.
-- The "Our changes" sections below are still empty. Only the team can fill them; git cannot tell hand edits apart,
-  because every commit is under the same author.
-
-**Generated:**
-- `scan_with_image` in `matching/agency_cleansing.py` and `POST /api/v1/matching/agency/image-cleanse`. The scan
-  must resolve to one registered vehicle. Rows holding the same misreading are corrected (`IMG1`). Rows without
-  attributes are re-decided by the same rule engine using the photo's make / model / colour / type (`IMG2/R7`).
-  Rows with their own attributes keep their own decision. Preview first, then apply.
-- The "Cleanse recorded data with this scan" panel on 📷 Scan & Match.
-- `tests/test_image_cleansing.py` (6 tests).
-- `tests/conftest.py` forces local mode, so `.env` cannot redirect the test suite.
-- A rubric → evidence map at the top of `docs/approximate_matching.md`.
-
-**Design decision made during generation:** the first version let the "same reading as the photo" rule override a
-camera row whose own make / model / colour contradicted the photo. This was changed before testing: a row's own
-evidence beats the photo. `test_row_own_contradicting_evidence_beats_the_photo` checks it.
-
-**Verified:** 122 tests pass with the remote `.env` in place. The evaluator flow was run live over HTTP on an
-isolated copy of the project (so the demo data and audit log were not touched): REPL insert → scan stays in
-review → photo + attributes → corrected → rescan shows 0 anomalies.
-
-✍️ **Our changes:**
-- …
-
-## What we reviewed and kept, changed, or rejected
-
-✍️ Fill this in: suggestions you rejected or changed, bugs you spotted in generated code, and anything you verified
-yourself (e.g. live runs in the browser).
-
-| Generated item | What we did | Why |
+| Phase | Dates | Commits |
 |---|---|---|
-| … | kept / changed / rejected | … |
+| 1: Federated integration | 2026-09-08 → 09-18 | `2c71694` … `c4f28cf` |
+| 2: Noisy data: approximate matching and cleansing | 2026-10-20 → 10-22 | `be12293` … `dfa3d91` |
+| 3: Security (step 0), then unstructured data integration | 2026-11-13 → | `8e2ca2f` … (branch `phase3`) |
+
+---
+
+# Phase 1: Federated integration of five agency databases
+
+### P1.1 Base system (`94a58d8`, 17 files, +3,704)
+
+**Prompt:** "Build a system that identifies uninsured vehicles on the road from five independent sources:
+- ANPR cameras
+- insurance company
+- RTO registration
+- police theft / shredding
+- Ministry of Transport reports
+
+Each source needs its own SQLite database and a deliberately different key column for the vehicle. Also needed:
+- a schema matcher that finds the linking columns automatically
+- a query decomposer that sends one plate lookup to all five sources
+- a result integrator that merges the answers and computes an explainable risk score
+- a write-back that files a report in the Ministry database when the risk is high
+- a two-page web GUI"
+
+**Generated:** `setup_databases.py` (5 databases), `schema_matcher.py`, `query_decomposer.py`,
+`result_integrator.py`, `mot_reporter.py`, `app.py`, dashboard and search pages.
+
+### P1.2 Microservices, warehouse and cache-aside (`f4da272`, 97 files, +9,037 / −3,609)
+
+**Prompt:** "Turn each database into its own Flask microservice on its own port (5002–5006), with a central
+mediator on 5001 and the web front end on 3000. Requirements:
+- **Federation:** the mediator queries the five services in parallel and merges the answers into one vehicle
+  dossier.
+- **Warehouse:** a Kimball star-schema warehouse (fact + vehicle / date / location / status dimensions), fed by an
+  ETL pipeline, with materialised views for the fleet pages.
+- **Cache-aside:** dossiers are cached in the warehouse with a 300 s TTL, and an invalidation webhook from the
+  e-Challan service marks a dossier stale.
+- **Data:** 2,000 deterministic fictional vehicles, with fixed demo vehicles DL01AB1001–1010 (insured, expired,
+  uninsured, stolen, scrapped, expired RC, suspicious, shredded, recovered, multi-policy).
+- **Pages:** vehicle inspector, fleet table with server-side pagination, e-Challan register, architecture page."
+
+**Generated:**
+- `backend/*/` (five services)
+- `backend/mediator_app.py`
+- `etl/`, `dwh/`, `schemas/`, `seed/`
+- the `frontend/` pages
+- the `docs/` architecture notes
+- the test suite
+
+### P1.3 Distributed SQL REPL and two-laptop mode (`fd30970`, 21 files, +1,917 / −510)
+
+**Prompt:** "Add a password-protected SQL console that runs a query on any agency database through the mediator,
+so the evaluator can insert, update and delete records live, and show the hop-by-hop trace. Also:
+- let the five services run on another laptop (REMOTE_HOST or HOST_* in .env)
+- when they are unreachable, fall back to the cached dossier instead of failing"
+
+**Generated:**
+- `POST /api/v1/internal/execute-sql` on every service
+- the REPL page (`repl.html`, `repl.js`)
+- `/sql/execute` in the mediator
+- remote-host settings in `backend/config.py` and `.env.example`
+- the cache-fallback path in the vehicle lookup
+
+### P1.4 e-Challan through the mediator (`7b199bb`)
+
+**Prompt:** "The e-Challan page calls the e-Challan service directly, which breaks when the services are on another
+laptop. Route the list and the status updates through the mediator."
+
+### P1.5 Keeping the cache in step with REPL writes (`6d7c72e`, `016c3fd`, `55c92c6`)
+
+**Prompt:** "After an INSERT / UPDATE / DELETE in the SQL console, the vehicle page still shows the old dossier until
+'Force Live Sync' is pressed. Make REPL writes show up immediately."
+
+### P1.6 Unregistered plates (`c4f28cf`)
+
+**Prompt:** "A lookup for a plate that is not registered shows 'service offline'. A 404 means the service is up and
+simply has no record, so show the vehicle as unregistered."
+
+## Our changes (phase 1)
+
+- **REPL write synchronisation: three iterations, each tested against the running system.**
+  - `6d7c72e`: first fix. After a write, find the plates in the SQL text and delete their cached dossiers.
+  - `016c3fd`: deleting was not enough, because the page still needed a live sync. Changed it to re-federate and
+    re-cache the affected plates at once, and to mirror the write into the local database copy.
+  - `55c92c6`: simplified again. The re-federation per plate was removed and the cache is left to its normal
+    invalidation. Mutation detection was extended to ALTER / CREATE / DROP, and WAL mode was added for the copy.
+  - The mirroring step later turned out to apply every INSERT twice when everything runs on one machine (found in
+    phase 2, removed in `14a45e1`).
+- **`7b199bb`, e-Challan via the mediator.** Added the list and status proxies to `backend/mediator_app.py` and
+  pointed the e-Challan page at them, so the page works when the services run on the second laptop.
+- **`c4f28cf`, the 404 handling** in `_fetch_service`:
+  - an HTTP 404 from an agency now means "service up, no record", where any error used to mean "offline"
+  - the dossier marks such a vehicle UNREGISTERED
+  - `inspector.js` shows it that way
+- **Two-laptop setup** (`fd30970`): configured REMOTE_HOST / HOST_* and tested the mediator on one laptop against
+  the services on the other.
+- **`2c71694`, `ee990d2`, README:** first README written, then rewritten: key capabilities, architecture diagram,
+  how to run. The long scope / out-of-scope and innovation sections were replaced with a shorter capability
+  summary.
+- **`72a7996`, `103d5e4`, README:** added the team table (names, roll numbers, programme, project title, course) and fixed
+  a name in it.
+- **`121e2ee`, architecture page:** removed the self-awarded "Evaluation Rubric: 15/15 Marks" badge from
+  `frontend/pages/architecture.html`.
+
+---
+
+# Phase 2: Noisy plates: approximate matching and data cleansing
+
+### P2.1 Approximate matching and cleansing (`be12293`, 49 files)
+
+**Prompt:** "Given a noisy plate (from an image scan or a bad record), find every vehicle that approximately
+matches it. Requirements:
+- **Algorithms:** implement Levenshtein, Jaro–Winkler and an OCR-aware edit distance (O/0, I/1, B/8 cheaper).
+- **Evaluation:** score all three on a labelled noisy test set (precision / recall / F1), choose the best by
+  measurement, and justify the choice.
+- **Ranking:** rank every candidate above a threshold, not only the best one.
+- **Cleansing:** decide ACCEPT / CORRECT / REJECT / REVIEW for a noisy record using make, model, colour and type
+  as context. Never auto-correct when the evidence is ambiguous or conflicting.
+- **Audit:** keep original records and an append-only correction audit trail.
+- **Integration:** expose everything through the mediator, add a GUI page and tests."
+
+**Design decisions made during generation:**
+- The OCR-weighted distance was chosen by measurement: F1 0.877, against Levenshtein 0.704 and Jaro–Winkler 0.665
+  on 290 labelled queries.
+- The candidate threshold was raised from 0.70 to 0.80 after measuring 1,577 average candidates per query at 0.70.
+- Rule R8 auto-corrects only when *every* edit is a look-alike glyph swap.
+- A failing test (`DL01AB2070` vs `DL01AB2670`, identical make/model/colour/type) was relabelled, not the rule.
+  Refusing to choose was the correct result.
+
+### P2.2 OCR on real photos (`6be524e`, `d7c77dd`)
+
+**Prompt:** "These five real photos are read wrongly. Detect every text region and pick the one that is the number
+plate. Ignore badges, state names and watermarks. Add a server OCR engine, keep the browser engine as a fallback,
+and make both choose the same region."
+
+### P2.3 Match against all five databases (`135ef10`)
+
+**Prompt:** "Matching only checks VAHAN. Match the noisy plate against the plates held by all five agency
+databases and show, per candidate, which databases contain it."
+
+### P2.4 Cleansing the live agency data (`14a45e1`)
+
+**Prompt:** "In the evaluation the professor will insert, delete and modify records. Requirements:
+- cleansing must work on the live agency databases, not only on staged test records
+- corrections are written back through each agency's service
+- every decision is logged
+- changes made in the SQL console are picked up immediately"
+
+### P2.5 Cleansing with the scanned image as evidence (`dfa3d91`)
+
+**Prompt:** "Cleanse the recorded data with respect to the image: once a photo resolves to one registered vehicle,
+correct the rows that refer to it under a noisy identifier, using the make / model / colour seen in the photo.
+Preview first, then apply. Show how each score is calculated in the UI."
+
+**Our changes (phase 2):**
+- **Changed the generated design.** The first version matched against VAHAN only. We asked for all five databases
+  (P2.3); that became `matching/sources.py` and the "Found in" column.
+- **Reported failures.** We tested with five real photos the first OCR could not read (P2.2). That led to plate
+  region selection and the RapidOCR engine.
+- **Fixed by hand: `029ec02`**, `setup.py`. Old `-wal` / `-shm` files are deleted before the databases are
+  copied into the service folders. Without this, SQLite replayed the previous run's writes onto the fresh copy.
+- **Live test on two laptops.** This showed the REPL double insert and the 5-minute delay before new records
+  appeared in matching (both fixed in P2.4).
+
+---
+
+# Phase 3
+
+Working rule for this phase: generated code and our own edits go in **separate commits**. Each commit covers one
+file or 3–4 related files, so `git log --stat` shows exactly what changed.
+
+### P3.0 Need-to-know security, from the phase-2 feedback (`8e2ca2f` … `bd39e20`)
+
+**Prompt:** "Phase-2 feedback: any user can make the mediator pull and return whole agency databases. Make the
+federation need-to-know, like an intelligence network, with no bulk exposure:
+- only the mediator can call an agency, and every call must be authenticated and tamper-proof
+- users log in with a role (police, insurer, admin)
+- each agency checks the role itself
+- a plate search must not move whole plate lists
+- personal data is masked for roles that do not need it
+- every access is logged where it cannot be altered
+
+Remove the hard-coded REPL password. Keep all phase-1/2 features and tests working."
+
+**Holes found before writing code:**
+- `/identifiers` and `/registry/index` returned every plate of an agency without authentication, and the mediator
+  pulled all five lists for every search.
+- `/internal/execute-sql` on every agency ran any SQL for anyone on the network.
+- The REPL password was hard-coded, printed in an error message, pre-filled in the page and stored in the browser.
+- Owner names went to every caller.
+
+**Generated:**
+
+| Commit | Files | What |
+|---|---|---|
+| `8e2ca2f` | `backend/security.py` | tokens, PBKDF2 passwords, HMAC-signed requests (no replay), role policy, PII masking, append-only `access_audit` |
+| `b68fb42` | `matching/sources.py` | push-down matching: `POST /api/v1/match` returns only candidates (≥ 0.75, max 300) |
+| `d51fde1`, `9dd401a` | 5 agency services | signed access only, role policy, CORS removed, signed e-Challan webhook |
+| `bf111b8` | `matching_api.py`, `agency_cleansing.py` | search and suggestions via push-down; batch jobs signed as ADMIN |
+| `2cb217f` | `mediator_app.py` | login, role gates, rate limits, signed agency calls, hard-coded password removed |
+| `5b507f2`, `85d8b6c` | `api.js`, `app.js`, `repl.*` | login screen, token on every call, REPL needs ADMIN |
+| `45d4090` | tests | `test_security.py` (12 tests); existing tests run as ADMIN |
+
+**Design decisions made during generation:**
+- **Push-down cap.** Push-down was compared with full-list matching. A 50-row cap per agency gave the same decision
+  but a smaller candidate count (83 vs 217 for `DL01AB1O04`): the seeded plates are very alike, and with context a
+  truncated candidate could change the ranking. The cap became 300, and the test now requires the same decision,
+  corrected plate and candidate count.
+- **The agency enforces the role,** not only the mediator, so a faulty mediator route still cannot dump a database.
+- **`.env` is not auto-created** by `setup.py`: a second laptop would silently get a different secret.
+
+**Our changes (review of the generated code):**
+- **Required a live cross-check** instead of accepting a test-only result. Every page API was run against the real
+  services as insurer, police and admin. This found three bugs for non-admin users, fixed in `56fa5e3`:
+  - the matching page showed a misleading "0 plates from 0 databases"
+  - the fleet page crashed on a 403
+  - the e-Challan page said "No challans found" instead of the access reason
+
+**Verified:** 139 tests pass (3 skipped). Live over HTTP:
+- an unsigned agency call gets 401
+- an insurer sees `V***** V****` while police see the name
+- an insurer gets 403 on the SQL console
+- the audit table cannot be read or changed through SQL
+- the e-Challan webhook still invalidates the cache
+
+<!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
