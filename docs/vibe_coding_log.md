@@ -504,4 +504,30 @@ and the five samples. Six of seven read the whole plate (`DL1AB2345`, `DL7C01939
 sample reads `01AB1234` as before. Before the fix, three of seven did. OCR and matching tests: 57 pass (3 skipped,
 no server OCR engine installed), plus a new test for the fragment case.
 
+### P3.6 Whole-system sweep, and a random plate from the internet
+
+**Prompt:** "Cross-verify everything else the same way. The professor will give a random number plate from the
+internet."
+
+**Checked:**
+- Every page and asset loads.
+- Every API the pages call (20 endpoints) works for each role (admin, police, insurer) on a separate copy of the
+  system: no 5xx errors, and every 403 matches the access policy.
+- The benchmark plates DL01AB1001–1006 and 1010 give the verdicts in the README table.
+
+**Found and fixed:**
+- **Topology page:** the schema-matching box called the Mediator without the login token (401 since the security
+  work), so it stayed empty. It now uses the logged-in `apiFetch`.
+- **Health pill:** it ignored the Document Store and always said "5 Services Online". It now checks all 6
+  services and counts them, so a laptop-4 outage shows as "Partial Outage: 5/6".
+- **Random plate, unrelated documents:** for a plate no database knows, the context is empty, yet 12 unrelated
+  theft FIRs were shown as "related", only because the query said "stolen". Now, without context, only documents
+  that name the queried plate itself (exactly or with an OCR slip) or its ids count, and the page explains why.
+- **Delhi-style plate not read from text:** `DL 7C D 1939` (space inside the series) was not recognised in
+  documents or queries. The plate pattern now allows it; no plate read from the 1,333 documents changed.
+
+**Verified:** 174 tests pass (3 skipped). The document-search evaluation is unchanged. Live, a tip-off about the
+unregistered `DL 7C D 1939` is linked to that plate ("not registered"), and asking for that plate returns exactly
+that document.
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
