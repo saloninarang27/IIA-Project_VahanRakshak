@@ -4,7 +4,63 @@
 document.addEventListener('DOMContentLoaded', () => {
   initNavbarActive();
   checkSystemHealth();
+  renderSessionChip();
+  if (!Auth.token()) showLoginGate();
 });
+
+// ---------------------------------------------------------------------------
+// Login gate: every Mediator call needs a session; what you can see depends on your role.
+// ---------------------------------------------------------------------------
+function showLoginGate(message) {
+  if (document.getElementById('login-gate')) return;
+  const gate = document.createElement('div');
+  gate.id = 'login-gate';
+  gate.className = 'modal-overlay active';
+  gate.style.zIndex = '10000';
+  gate.innerHTML = `
+    <div class="modal-card" style="max-width:380px;">
+      <div class="modal-header"><div class="modal-title">🔐 Sign in to VehicleSentinel</div></div>
+      <div class="modal-body">
+        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">
+          Access is need-to-know: police, insurer and admin accounts see different data.</p>
+        <div id="login-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;padding:0.6rem;border-radius:6px;font-size:0.83rem;margin-bottom:0.8rem;"></div>
+        <input id="login-user" class="search-input" style="width:100%;margin-bottom:0.6rem;" placeholder="Username" autocomplete="username">
+        <input id="login-pass" class="search-input" type="password" style="width:100%;margin-bottom:1rem;" placeholder="Password" autocomplete="current-password">
+        <button id="login-btn" class="btn btn-primary" style="width:100%;">Sign in</button>
+      </div>
+    </div>`;
+  document.body.appendChild(gate);
+  const err = gate.querySelector('#login-error');
+  if (message) { err.textContent = message; err.style.display = 'block'; }
+  const submit = async () => {
+    const btn = gate.querySelector('#login-btn');
+    btn.disabled = true;
+    try {
+      const res = await Auth.login(gate.querySelector('#login-user').value.trim(), gate.querySelector('#login-pass').value);
+      if (res.ok) { location.reload(); return; }
+      err.textContent = res.data.error || 'Login failed.';
+    } catch (e) {
+      err.textContent = `Cannot reach the Mediator: ${e.message}`;
+    }
+    err.style.display = 'block';
+    btn.disabled = false;
+  };
+  gate.querySelector('#login-btn').addEventListener('click', submit);
+  gate.querySelector('#login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+  gate.querySelector('#login-user').focus();
+}
+
+function renderSessionChip() {
+  const s = Auth.session();
+  if (!s) return;
+  const chip = document.createElement('div');
+  chip.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:9000;background:#fff;border:1px solid #e2e8f0;border-radius:999px;padding:0.35rem 0.8rem;font-size:0.8rem;box-shadow:0 2px 8px rgba(0,0,0,0.08);';
+  chip.innerHTML = `👤 <strong></strong> <span class="badge badge-info"></span> <a href="#" style="margin-left:0.4rem;">Log out</a>`;
+  chip.querySelector('strong').textContent = s.user;
+  chip.querySelector('.badge').textContent = s.role;
+  chip.querySelector('a').addEventListener('click', e => { e.preventDefault(); Auth.logout(); location.reload(); });
+  document.body.appendChild(chip);
+}
 
 function initNavbarActive() {
   const currentPath = window.location.pathname;
