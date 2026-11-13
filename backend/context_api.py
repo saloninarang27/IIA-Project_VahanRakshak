@@ -42,9 +42,6 @@ MAX_ROUNDS = 3
 
 _fetch = None
 
-# Indian plate, tolerant to OCR / typing noise in any part (DL01A81004, DL 0I AB 1O04, dl-01-ab-1004):
-# two letters, then 6-8 letters/digits, optionally split by spaces or hyphens; at least 4 digits overall.
-PLATE_RE = re.compile(r"\b[A-Z]{2}(?:[\s-]?[A-Z0-9]){6,8}\b", re.I)
 KEY_PATTERNS = {"fir_no": re.compile(r"\bFIR\s*-?\s*(\d{3,6})\b", re.I),
                 "owner_id": re.compile(r"\bOWN\s*-?\s*(\d{3,6})\b", re.I),
                 "policy_number": re.compile(r"\bPOL\s*-?\s*(\d{5,8})\b", re.I)}
@@ -81,20 +78,20 @@ ENTITY_COLUMNS = {
 IGNORED_EVENT_VALUES = {"NONE", None, ""}
 
 
-def configure(fetch_service):
-    global _fetch
+_dossier = None
+
+
+def configure(fetch_service, dossier=None):
+    """fetch_service: the Mediator's signed fetcher; dossier(plate): the agencies' combined verdicts for a plate."""
+    global _fetch, _dossier
     _fetch = fetch_service
+    _dossier = dossier
 
 
 # ---------------------------------------------------------------------------
 def _plate_candidates(text):
-    out = []
-    for m in PLATE_RE.finditer(text):
-        plate = re.sub(r"[\s-]", "", m.group(0)).upper()
-        # state code is followed by the district number (a digit, or a digit OCR-misread as O / I / L)
-        if 8 <= len(plate) <= 10 and sum(ch.isdigit() for ch in plate) >= 4 and plate[2] in "0123456789OIL":
-            out.append((m.group(0), plate))
-    return out
+    from docsearch.text import plate_spans   # one plate reader for queries and documents
+    return plate_spans(text)
 
 
 def parse_query(text):
@@ -264,7 +261,7 @@ def accumulate(facts, terms):
     for t in terms:
         weighted[t.lower()] = 1.0
     for group, items in entities.items():
-        if group == "dates":
+        if group in ("dates", "people"):     # dates are matched separately; names are not search terms
             continue
         for item in items[:12]:
             v = item["value"].lower().replace("_", " ")
@@ -314,3 +311,75 @@ def context_query():
         return jsonify({"status": "error", "error": "query is required"}), 400
     rounds = max(1, min(int(body.get("max_rounds") or MAX_ROUNDS), MAX_ROUNDS))
     return jsonify(discover_context(query, g.get("role") or "ADMIN", rounds))
+
+
+# ---------------------------------------------------------------------------
+# Rubric 3: search the unstructured documents with the context and integrate them
+# ---------------------------------------------------------------------------
+DOC_METHOD = "context_entities"   # chosen by measurement (docsearch/evaluation.py)
+DOSSIER_FIELDS = ("vehicle_identifier", "make", "model", "color", "owner_name", "registration_status",
+                  "insurance_status", "insurance_company", "insurance_expiry_date", "theft_status", "theft_report_date",
+                  "recovery_date", "suspicion_status", "scrapping_status", "capture_time", "location",
+                  "detection_count", "risk_level", "open_challans", "ministry_report_reasons")
+
+
+def search_documents(ctx_result, role, method=DOC_METHOD, k=12):
+    """Push the search down to the document store: it ranks its own documents with the query context."""
+    from docsearch.index import context_for_search
+    search_ctx = context_for_search(ctx_result)
+    res = _fetch(f"{config.URL_DOCS}/api/v1/search", "Document store - search", role=role, method="POST",
+                 body={"context": search_ctx, "method": method, "k": k})
+    data = res.get("data") or {}
+    return {"status": res["status"], "endpoint": res["url"], "latency_ms": res["latency_ms"], "error": res.get("error"),
+            "method": method, "search_context": search_ctx, "searched": data.get("searched"),
+            "hidden_by_role": data.get("hidden_by_role"), "results": data.get("results", [])}
+
+
+def integrated_query(query, role, method=DOC_METHOD):
+    from docsearch.integrate import integrate
+    started = time.time()
+    ctx = discover_context(query, role)
+    if ctx.get("status") == "error":
+        return ctx
+    docs = search_documents(ctx, role, method)
+    main = (ctx.get("text_focus") or {}).get("chosen_plates") or [e["value"] for e in ctx["entities"].get("vehicles", [])][:3]
+    structured = {}
+    for plate in main:
+        d = _dossier(plate) if _dossier else {}
+        structured[plate] = {k: d.get(k) for k in DOSSIER_FIELDS}
+    integration = integrate(structured, docs["results"], ctx["facts"])
+    for doc in docs["results"]:
+        doc.pop("body", None)         # the snippet is enough on the wire; the full text is one click away
+    ctx.update(documents=docs, structured=structured, integration=integration,
+               latency_ms=round((time.time() - started) * 1000, 1))
+    return ctx
+
+
+@context_bp.route("/integrated", methods=["POST"])
+def integrated():
+    body = request.get_json(force=True, silent=True) or {}
+    query = (body.get("query") or "").strip()
+    if not query:
+        return jsonify({"status": "error", "error": "query is required"}), 400
+    method = body.get("method") or DOC_METHOD
+    return jsonify(integrated_query(query, g.get("role") or "ADMIN", method))
+
+
+@context_bp.route("/documents/<int:doc_id>", methods=["GET"])
+def get_document(doc_id):
+    res = _fetch(f"{config.URL_DOCS}/api/v1/documents/{doc_id}", "Document store", role=g.get("role"))
+    return jsonify(res.get("data") or {"error": res.get("error")}), res["status"]
+
+
+@context_bp.route("/documents", methods=["POST"])
+def add_document():
+    """Add a free-text document (e.g. a new tip-off) - searchable immediately."""
+    res = _fetch(f"{config.URL_DOCS}/api/v1/documents", "Document store", role=g.get("role"), method="POST",
+                 body=request.get_json(force=True, silent=True) or {})
+    return jsonify(res.get("data") or {"error": res.get("error")}), res["status"]
+
+
+@context_bp.route("/documents/<int:doc_id>", methods=["DELETE"])
+def delete_document(doc_id):
+    res = _fetch(f"{config.URL_DOCS}/api/v1/documents/{doc_id}", "Document store", role=g.get("role"), method="DELETE")
+    return jsonify(res.get("data") or {"error": res.get("error")}), res["status"]

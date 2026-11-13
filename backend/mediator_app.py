@@ -140,6 +140,10 @@ def current_role():
     return (g.get("role") if has_request_context() else None) or "ADMIN"
 
 
+# Offline tools (tests, docsearch/evaluation.py) call this checkout's agency apps in-process instead of over HTTP.
+IN_PROCESS = False
+
+
 def _in_process_service(url, method, req):
     """
     pytest only (local mode): call this checkout's agency app in-process with the same signed
@@ -155,6 +159,7 @@ def _in_process_service(url, method, req):
         config.PORT_POLICE: "backend.POLICE_CCTNS.cctns_service",
         config.PORT_ANPR: "backend.ANPR_CAMERA.anpr_service",
         config.PORT_ECHALLAN: "backend.ECHALLAN.echallan_service",
+        config.PORT_DOCS: "backend.DOCS.docs_service",
     }
     if parsed.port not in app_map:
         return None
@@ -172,7 +177,7 @@ def _fetch_service(url, service_name, role=None, method="GET", body=None):
     req = security.signed_request(url, method, body, role=role)
     req.add_header("User-Agent", "Mediator-GlobalSchemaCoordinator/2.0")
 
-    if "pytest" in sys.modules and config.DEFAULT_HOST in ("127.0.0.1", "localhost"):
+    if (IN_PROCESS or "pytest" in sys.modules) and config.DEFAULT_HOST in ("127.0.0.1", "localhost"):
         resp = _in_process_service(url, method, req)
         if resp is not None:
             return {"service": service_name, "url": url, "status": resp.status_code,
@@ -392,7 +397,8 @@ app.register_blueprint(matching_api.matching_bp)
 
 # Federated context discovery across the five databases (backend/context_api.py)
 from backend import context_api
-context_api.configure(_fetch_service)
+context_api.configure(_fetch_service,
+                      dossier=lambda plate: merge_to_global_dossier(plate, fetch_all_agency_apis(plate)))
 app.register_blueprint(context_api.context_bp)
 
 def _attach_approximate_matches(vehicle):
