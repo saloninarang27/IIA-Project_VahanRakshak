@@ -339,4 +339,51 @@ joined by FK → PK:
 - vehicle lookup and the phase-2 agency scan are unchanged
 - the phase-2 algorithm result is unchanged (F1 0.877)
 
+### P3.2 Federated context discovery across databases (rubric 2)
+
+**Prompt:** "The user query must be federated to the databases running on different machines, and each database
+must discover the context itself by following its FK → PK relationships. Requirements:
+- **Across databases:** keys found in one database (owner, FIR, plate) lead into the others.
+- **Relevance:** the accumulated context must stay highly related to the query.
+- **Need-to-know:** keep the security model.
+- **Four laptops:** make it runnable on four laptops.
+- **GUI:** add a page that shows the rounds and the context."
+
+**Generated:**
+- **`backend/context_engine.py`:** `POST /api/v1/context` on every agency. It does a generic FK-graph walk from
+  `PRAGMA foreign_key_list`, scores rows by hop decay × query-term matches, exports cross-database keys, and
+  returns restricted tables as keys only.
+- **`backend/context_api.py`:**
+  - query parsing, with noisy plates resolved by the phase-2 matcher;
+  - rounds that route new keys to the agencies that accept them;
+  - focusing text queries on vehicles by query-word coverage;
+  - accumulation into entities and weighted context terms.
+- **`start_system.py --services`**, so each laptop starts only its own part.
+- 🧭 Context Discovery page, `docs/context_discovery.md`, `tests/test_context.py` (10 tests).
+
+**Found while testing (and fixed):**
+- **Shared parents spread the context.** The first walk went up to shared parent rows (RTO office, insurer,
+  police station) and back down to *every* vehicle under them. One plate query reached 53 rows and keys of 48
+  unrelated vehicles. Rule added: once a path goes up, it only continues up. The same query now reaches 6 rows,
+  all about that one car.
+- **Noisy plates were missed.** `DL01A81004` (8 for B) was not recognised as a plate. The pattern now accepts
+  letters or digits in every part, and the plate is resolved by the phase-2 matcher.
+- **A false plate:** "INSURANCE CLAIMS 2026" was read as plate `CLAIMS2026`. A plate must have a digit after the
+  2-letter state code.
+- **Text queries drifted:** "stolen Nexon Gurugram" ran 3 rounds and returned 60 facts about dozens of vehicles.
+  Vehicles are now ranked by how many query words their facts cover across all databases, and only the best are
+  followed.
+- **Repeated work:** keys were sent back to the agency that had just reported them. They now go only to agencies
+  that did not report them.
+- **Local data on the mediator:** the mediator's offline fallback could read a local copy of an agency database
+  even when that agency runs on another laptop. It now does so only for agencies configured on its own machine.
+
+**Verified:**
+- **Tests:** 162 pass (3 skipped).
+- **Four machines on one laptop:** loopback addresses 127.0.0.1–127.0.0.4, each started with `--services`.
+  - `accident claim FIR70001` (police) ran 3 rounds: IIB and Police found the FIR, which led to plate
+    `DL01AB1001` and owner `OWN2001`, which led to VAHAN and ANPR. Result: 16 facts from 4 databases, one vehicle.
+  - With the "ANPR laptop" stopped, ANPR showed 503 and the other four still answered.
+- **Live data:** a claim inserted live appears in the context at once and is gone after it is deleted.
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
