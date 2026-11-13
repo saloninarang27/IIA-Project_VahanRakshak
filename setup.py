@@ -63,6 +63,12 @@ def main():
     print(f"  [✓] {staged} noisy records staged for cleansing.")
     print(f"  [✓] Best method: {best['label']} (F1 {best['f1']:.3f} at threshold {best['best_threshold']:.2f}).")
 
+    from backend import security
+    if not security.configured():
+        print("\n[!] Security is not configured on this laptop (no FEDERATION_SECRET in .env).")
+        print("    First laptop:  python -m backend.security init-env   (prints the login passwords once)")
+        print("    Other laptops: copy that same .env file into this folder.")
+
     print("\nSetup complete. Next steps:")
     print("  python3 start_system.py # launch the distributed web app + microservices")
     print("  pytest                  # run the automated test suite")
