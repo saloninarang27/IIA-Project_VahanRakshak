@@ -82,12 +82,12 @@ def report_to_ministry(raw_identifier: str, force: bool = False) -> dict:
                 """
                 INSERT INTO ministry_report
                     (vehicle_identifier, report_type, report_reason, detected_at,
-                     severity, report_status, submitted_at, ministry_reference)
-                VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?)
+                     severity, report_status, submitted_at, ministry_reference, offence_code)
+                VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?, (SELECT offence_code FROM offence_code WHERE report_type = ?))
                 """,
                 (
                     vehicle_id, reason, REASON_TEXT.get(reason, reason), detected_at,
-                    severity, submitted_at, reference,
+                    severity, submitted_at, reference, reason,
                 ),
             )
             conn.commit()

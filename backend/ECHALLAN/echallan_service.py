@@ -61,6 +61,7 @@ def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA foreign_keys = ON")  # FK -> PK enforced for every write, including the SQL console
     return conn
 
 @app.route("/api/v1/health", methods=["GET"])
@@ -145,10 +146,11 @@ def issue_challan():
         conn.execute(
             """
             INSERT INTO ministry_report
-                (vehicle_identifier, report_type, report_reason, detected_at, severity, report_status, submitted_at, ministry_reference)
-            VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?)
+                (vehicle_identifier, report_type, report_reason, detected_at, severity, report_status, submitted_at,
+                 ministry_reference, offence_code)
+            VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?, (SELECT offence_code FROM offence_code WHERE report_type = ?))
             """,
-            (clean_id, report_type, report_reason, detected_at, severity, submitted_at, ref)
+            (clean_id, report_type, report_reason, detected_at, severity, submitted_at, ref, report_type)
         )
         conn.commit()
         last_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

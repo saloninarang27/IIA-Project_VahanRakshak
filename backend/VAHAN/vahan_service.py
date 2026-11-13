@@ -31,6 +31,7 @@ def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA foreign_keys = ON")  # FK -> PK enforced for every write, including the SQL console
     return conn
 
 @app.route("/api/v1/health", methods=["GET"])
@@ -112,17 +113,23 @@ def register_vehicle():
 
     clean_id = data["vehicle_registration_id"].strip().upper().replace(" ", "").replace("-", "")
     with get_db() as conn:
+        # owner and vehicle_model are parent tables (FK -> PK): make sure the parents exist first
+        conn.execute("INSERT OR IGNORE INTO owner (owner_id, owner_name) VALUES (?, ?)",
+                     (data["owner_id"], data["owner_name"]))
+        model = conn.execute("SELECT model_id FROM vehicle_model WHERE make = ? AND model = ?",
+                             (data.get("vehicle_make"), data.get("vehicle_model"))).fetchone()
         conn.execute(
             """
             INSERT INTO vehicle_registration
                 (vehicle_registration_id, owner_id, owner_name, registration_date, registration_expiry_date,
-                 vehicle_make, vehicle_model, vehicle_type, fuel_type, color, registration_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 vehicle_make, vehicle_model, vehicle_type, fuel_type, color, registration_status, model_id, rto_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 clean_id, data["owner_id"], data["owner_name"], data["registration_date"],
                 data["registration_expiry_date"], data.get("vehicle_make"), data.get("vehicle_model"),
-                data.get("vehicle_type"), data.get("fuel_type"), data.get("color"), data["registration_status"]
+                data.get("vehicle_type"), data.get("fuel_type"), data.get("color"), data["registration_status"],
+                model["model_id"] if model else None, data.get("rto_code")
             )
         )
         conn.commit()
