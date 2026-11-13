@@ -116,3 +116,12 @@ def test_rapidocr_end_to_end_on_samples(sample, expected):
         result = ocr.extract_plate_text(f.read())
     assert result["engine"] == "rapidocr"
     assert ocr._normalize(result["raw_text"]) == expected
+
+
+def test_whole_plate_beats_a_plate_shaped_fragment():
+    # real photo "DL 7C D 1939": OCR reads the D as 0, so "DL7C0" alone also looks like a plate
+    from matching.ocr import select_plate_text
+    dets = [{"text": "DL7C0", "confidence": 0.9, "box": [100, 100, 200, 140]},
+            {"text": "1939", "confidence": 0.9, "box": [205, 100, 280, 140]},
+            {"text": "2093983801", "confidence": 0.9, "box": [100, 200, 200, 210]}]   # stock-photo id, small text
+    assert select_plate_text(dets)["text"] == "DL7C0 1939"

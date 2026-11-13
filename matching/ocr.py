@@ -34,6 +34,8 @@ MAX_PLATE_CHARS = 11
 # state code, RTO number, series letters, number - e.g. MH12DE1433, DL1AB2345
 INDIAN_PLATE_RE = re.compile(r"^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$")
 BH_SERIES_RE = re.compile(r"^\d{2}BH\d{4}[A-Z]{1,2}$")
+# whole plate whose series letters may be OCR-confused digits (D->0, I->1, Z->2, S->5, B->8): DL7C01939
+FULL_PLATE_OCR_RE = re.compile(r"^[A-Z]{2}\d{1,2}[A-Z01258]{1,3}\d{4}$")
 
 
 class OCRUnavailable(RuntimeError):
@@ -111,8 +113,12 @@ def _plate_score(text, height, max_height, confidence):
     if any(c.isalpha() for c in norm):
         score += 0.15
     score += 0.02 * len(norm)                    # prefer the whole row over a fragment of it
-    if INDIAN_PLATE_RE.match(norm) or BH_SERIES_RE.match(norm):
-        score += 0.35
+    if BH_SERIES_RE.match(norm) or (INDIAN_PLATE_RE.match(norm) and norm[-4:].isdigit()):
+        score += 0.35                            # the whole plate
+    elif FULL_PLATE_OCR_RE.match(norm) and any(c.isalpha() for c in norm[2:-4]):
+        score += 0.3                             # the whole plate, a series letter misread as a digit
+    elif INDIAN_PLATE_RE.match(norm):
+        score += 0.15                            # plate-shaped, but possibly a fragment (DL7C0 of DL 7C D 1939)
     return round(score, 4)
 
 
