@@ -8,14 +8,28 @@ import os
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify, make_response
-from flask_cors import CORS
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from backend import security
+from matching.sources import register_match_endpoint
 import urllib.request
 import json
 
 app = Flask(__name__)
-CORS(app)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ministry_echallan.db")
+
+# Only the Mediator may call this service (signed requests); bulk and write endpoints need a role.
+# No CORS: browsers never talk to an agency directly.
+ACCESS_POLICY = {
+    ("GET", "/api/v1/identifiers"): {"ADMIN"},
+    ("GET", "/api/v1/challans$"): {"POLICE", "ADMIN"},
+    ("POST", "/api/v1/challans"): {"POLICE", "ADMIN"},
+    ("PUT", "/api/v1/challans"): {"POLICE", "ADMIN"},
+    ("POST", "/api/v1/internal/execute-sql"): {"ADMIN"},
+}
+security.protect_service(app, DB_PATH, ACCESS_POLICY)
+register_match_endpoint(app, "ECHALLAN")
 
 def _mediator_base_url():
     """
@@ -35,10 +49,9 @@ def _mediator_base_url():
 def _notify_mediator(vehicle_identifier, reason):
     """Webhook ping so the Mediator invalidates its cached dossier for this vehicle."""
     try:
-        req = urllib.request.Request(
-            f"{_mediator_base_url()}/api/v1/sync/invalidate",
-            data=json.dumps({"vehicle_identifier": vehicle_identifier, "reason": reason}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
+        req = security.signed_request(
+            f"{_mediator_base_url()}/api/v1/sync/invalidate", "POST",
+            {"vehicle_identifier": vehicle_identifier, "reason": reason}, role="ADMIN", caller="echallan"
         )
         urllib.request.urlopen(req, timeout=1.0)
     except Exception:
