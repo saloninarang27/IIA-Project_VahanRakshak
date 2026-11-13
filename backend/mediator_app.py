@@ -29,8 +29,6 @@ import backend.config as config
 from backend import security
 from matching.normalize import normalize_plate
 from ministry.rules import (
-    compute_insurance_status,
-    compute_suspicion_status,
     compute_risk_level,
     compute_ministry_requirement,
     parse_date,
@@ -142,12 +140,45 @@ def current_role():
     return (g.get("role") if has_request_context() else None) or "ADMIN"
 
 
+def _in_process_service(url, method, req):
+    """
+    pytest only (local mode): call this checkout's agency app in-process with the same signed
+    request, so the suite is hermetic and fast (on Windows a refused connection costs ~2 s).
+    """
+    from urllib.parse import urlparse
+    import importlib
+    from flask.testing import FlaskClient
+    parsed = urlparse(url)
+    app_map = {
+        config.PORT_IIB: "backend.IIB.iib_service",
+        config.PORT_VAHAN: "backend.VAHAN.vahan_service",
+        config.PORT_POLICE: "backend.POLICE_CCTNS.cctns_service",
+        config.PORT_ANPR: "backend.ANPR_CAMERA.anpr_service",
+        config.PORT_ECHALLAN: "backend.ECHALLAN.echallan_service",
+    }
+    if parsed.port not in app_map:
+        return None
+    svc_app = importlib.import_module(app_map[parsed.port]).app
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    with FlaskClient(svc_app, svc_app.response_class) as client:
+        return client.open(path, method=method, headers=dict(req.header_items()),
+                           data=req.data or b"", content_type="application/json")
+
+
 def _fetch_service(url, service_name, role=None, method="GET", body=None):
     """Signed call to an agency service on behalf of `role` (default: the current user's role)."""
     start = time.time()
     role = role or current_role()
     req = security.signed_request(url, method, body, role=role)
     req.add_header("User-Agent", "Mediator-GlobalSchemaCoordinator/2.0")
+
+    if "pytest" in sys.modules and config.DEFAULT_HOST in ("127.0.0.1", "localhost"):
+        resp = _in_process_service(url, method, req)
+        if resp is not None:
+            return {"service": service_name, "url": url, "status": resp.status_code,
+                    "latency_ms": round((time.time() - start) * 1000, 2), "data": resp.get_json(),
+                    "error": None if resp.status_code in (200, 404) else f"Service returned HTTP {resp.status_code}"}
+
     try:
         with urllib.request.urlopen(req, timeout=2.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -186,166 +217,132 @@ def _fetch_service(url, service_name, role=None, method="GET", body=None):
             "error": f"Service returned HTTP {http_err.code}: {http_err.reason}"
         }
     except Exception as e:
-        elapsed_ms = round((time.time() - start) * 1000, 2)
-        
-        # Only fall back to in-process mock during offline pytest when running in local 127.0.0.1 mode
-        is_local = config.DEFAULT_HOST in ("127.0.0.1", "localhost")
-        is_pytest = "pytest" in sys.modules
-        if is_pytest and is_local:
-            try:
-                from urllib.parse import urlparse
-                import importlib
-                from flask.testing import FlaskClient
-                parsed = urlparse(url)
-                port = parsed.port
-                path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-                app_map = {
-                    config.PORT_IIB: ("backend.IIB.iib_service", "app"),
-                    config.PORT_VAHAN: ("backend.VAHAN.vahan_service", "app"),
-                    config.PORT_POLICE: ("backend.POLICE_CCTNS.cctns_service", "app"),
-                    config.PORT_ANPR: ("backend.ANPR_CAMERA.anpr_service", "app"),
-                    config.PORT_ECHALLAN: ("backend.ECHALLAN.echallan_service", "app"),
-                }
-                if port in app_map:
-                    mod_name, app_name = app_map[port]
-                    mod = importlib.import_module(mod_name)
-                    svc_app = getattr(mod, app_name)
-                    with FlaskClient(svc_app, svc_app.response_class) as client:
-                        resp = client.open(path, method=method, headers=dict(req.header_items()),
-                                           data=req.data or b"", content_type="application/json")
-                        return {
-                            "service": service_name,
-                            "url": url,
-                            "status": resp.status_code,
-                            "latency_ms": elapsed_ms,
-                            "data": resp.get_json(),
-                            "error": None
-                        }
-            except Exception:
-                pass
-
-        # In all runtime/production cases, if host is down, strictly report it as offline
+        # If the host is down, strictly report it as offline
         return {
             "service": service_name,
             "url": url,
             "status": 503,
-            "latency_ms": elapsed_ms,
+            "latency_ms": round((time.time() - start) * 1000, 2),
             "data": None,
             "error": f"Service offline or unreachable at {url}: {str(e)}"
         }
 
-def fetch_all_agency_apis(clean_plate):
-    """Decomposes one global plate lookup into 5 independent local API calls."""
-    calls = {
-        "iib": (f"{config.URL_IIB}/api/v1/policies/{clean_plate}", "IIB (Insurance)"),
-        "vahan": (f"{config.URL_VAHAN}/api/v1/rc/{clean_plate}", "MoRTH VAHAN (RC)"),
-        "police": (f"{config.URL_POLICE}/api/v1/records/{clean_plate}", "Police CCTNS (Theft/Scrap)"),
-        "anpr": (f"{config.URL_ANPR}/api/v1/captures/{clean_plate}", "Traffic ANPR (Cameras)"),
-        "echallan": (f"{config.URL_ECHALLAN}/api/v1/challans/{clean_plate}", "MoRTH e-Challan")
-    }
+AGENCY_LABELS = {
+    "iib": ("IIB (Insurance)", "IIB_IRDAI", "Insurance Information Bureau of India", "registration_no"),
+    "vahan": ("MoRTH VAHAN (RC)", "MORTH_VAHAN", "Ministry of Road Transport and Highways (VAHAN)", "vehicle_registration_id"),
+    "police": ("Police CCTNS (Theft/Scrap)", "POLICE_CCTNS", "Police Crime & Criminal Tracking Network", "vehicle_no"),
+    "anpr": ("Traffic ANPR (Cameras)", "TRAFFIC_ANPR", "Highway Toll ANPR Camera Network", "plate_number"),
+    "echallan": ("MoRTH e-Challan", "MORTH_ECHALLAN", "MoRTH e-Challan & Notice Portal", "vehicle_identifier"),
+}
+AGENCY_URLS = {"iib": config.URL_IIB, "vahan": config.URL_VAHAN, "police": config.URL_POLICE,
+               "anpr": config.URL_ANPR, "echallan": config.URL_ECHALLAN}
 
-    results = {}
+
+def _verdict_url(key, clean_plate, on=None):
+    return f"{AGENCY_URLS[key]}/api/v1/verdict/{clean_plate}" + (f"?on={on.isoformat()}" if on else "")
+
+
+def fetch_all_agency_apis(clean_plate):
+    """
+    Decomposes one plate lookup into five questions, each answered BY the agency that owns the data
+    (verdict push-down, backend/verdicts.py). No agency sends its rows for the Mediator to evaluate.
+
+    Round 1 (parallel): VAHAN "registered?", Police "stolen/scrapped?", ANPR "seen on the road?",
+                        e-Challan "open challans?"
+    Round 2:            IIB "insured on <date of the last sighting>?" (the date comes from ANPR's answer)
+    """
     role = current_role()
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {k: executor.submit(_fetch_service, u, name, role) for k, (u, name) in calls.items()}
+    results = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {k: executor.submit(_fetch_service, _verdict_url(k, clean_plate), AGENCY_LABELS[k][0], role)
+                   for k in ("vahan", "police", "anpr", "echallan")}
         for k, fut in futures.items():
             results[k] = fut.result()
+    last_seen = ((results["anpr"].get("data") or {}).get("last_seen") or {}).get("captured_timestamp")
+    on = parse_date(last_seen) or config.SIMULATION_TODAY
+    results["iib"] = _fetch_service(_verdict_url("iib", clean_plate, on), AGENCY_LABELS["iib"][0], role)
+    return {k: results[k] for k in ("iib", "vahan", "police", "anpr", "echallan")}
 
-    return results
 
 # ---------------------------------------------------------------------------
-# Global Schema Merger: Transforms 5 local schemas into 1 global dossier
+# Global dossier: combines the five agencies' answers (the Mediator does not re-evaluate their data)
 # ---------------------------------------------------------------------------
 def merge_to_global_dossier(clean_plate, api_results):
-    iib_data = (api_results.get("iib", {}).get("data") or {}).get("policies", [])
-    vahan_data = (api_results.get("vahan", {}).get("data") or {}).get("rc_details")
-    police_data = (api_results.get("police", {}).get("data") or {}).get("record")
-    anpr_data = (api_results.get("anpr", {}).get("data") or {}).get("captures", [])
-    echallan_data = (api_results.get("echallan", {}).get("data") or {}).get("challans", [])
+    def answer(key):
+        res = api_results.get(key) or {}
+        return (res.get("data") or {}) if res.get("status") == 200 else {}
 
-    was_captured_on_road = len(anpr_data) > 0
-    latest_capture = anpr_data[0] if was_captured_on_road else None
+    iib, vahan, police, anpr, echallan = (answer(k) for k in ("iib", "vahan", "police", "anpr", "echallan"))
 
-    # Reference date for evaluating insurance validity
-    if latest_capture:
-        ref_date = parse_date(latest_capture.get("captured_timestamp")) or config.SIMULATION_TODAY
-    else:
-        ref_date = config.SIMULATION_TODAY
+    insurance_status = iib.get("insurance_status") or "UNINSURED"
+    suspicion_status = police.get("suspicion_status") or "NONE"
+    reg_status = vahan.get("registration_status") or "UNKNOWN"
+    was_captured_on_road = bool(anpr.get("seen_on_road"))
+    last_seen = anpr.get("last_seen") or {}
+    vehicle = vahan.get("vehicle") or {}
+    latest_challan = echallan.get("latest") or {}
 
-    ins_eval = compute_insurance_status(iib_data, ref_date)
-    insurance_status = ins_eval["status"]
-    active_policy = ins_eval["policy"]
-
-    suspicion_status = compute_suspicion_status(police_data)
-
-    reg_status = "UNKNOWN"
-    if vahan_data:
-        reg_status = vahan_data.get("registration_status", "UNKNOWN")
-        exp = parse_date(vahan_data.get("registration_expiry_date"))
-        if exp and exp < config.SIMULATION_TODAY:
-            reg_status = "EXPIRED"
-    elif api_results.get("vahan", {}).get("status") in (200, 404):
-        reg_status = "UNREGISTERED"
-
+    # Combining the answers is the Mediator's job: overall risk and the reporting requirement
     risk_level = compute_risk_level(insurance_status, suspicion_status, was_captured_on_road)
     ministry_eval = compute_ministry_requirement(insurance_status, suspicion_status, reg_status, was_captured_on_road)
-    latest_challan = echallan_data[0] if echallan_data else None
 
-    now_iso = datetime.now().isoformat(sep=" ", timespec="seconds")
-
-    dossier = {
+    return {
         "vehicle_identifier": clean_plate,
         "plate_number": clean_plate,
-        "capture_time": latest_capture.get("captured_timestamp") if latest_capture else None,
-        "camera_id": latest_capture.get("camera_id") if latest_capture else None,
-        "location": latest_capture.get("location") if latest_capture else None,
-        "detection_count": len(anpr_data),
+        "capture_time": last_seen.get("captured_timestamp"),
+        "camera_id": last_seen.get("camera_id"),
+        "location": last_seen.get("location"),
+        "detection_count": anpr.get("detection_count", 0),
         "was_captured_on_road": was_captured_on_road,
-        
-        # Vehicle specifications (VAHAN primary, ANPR camera fallback)
-        "make": (vahan_data or {}).get("vehicle_make") or (latest_capture or {}).get("detected_make"),
-        "model": (vahan_data or {}).get("vehicle_model") or (latest_capture or {}).get("detected_model"),
-        "color": (vahan_data or {}).get("color") or (latest_capture or {}).get("detected_color"),
-        "vehicle_type": (vahan_data or {}).get("vehicle_type") or (latest_capture or {}).get("vehicle_type"),
-        "fuel_type": (vahan_data or {}).get("fuel_type"),
-        "owner_name": (vahan_data or {}).get("owner_name"),
-        "owner_id": (vahan_data or {}).get("owner_id"),
 
-        # Registration details (VAHAN)
-        "registration_date": (vahan_data or {}).get("registration_date"),
-        "registration_expiry_date": (vahan_data or {}).get("registration_expiry_date"),
+        # Vehicle specifications (VAHAN primary, ANPR camera fallback)
+        "make": vehicle.get("vehicle_make") or last_seen.get("detected_make"),
+        "model": vehicle.get("vehicle_model") or last_seen.get("detected_model"),
+        "color": vehicle.get("color") or last_seen.get("detected_color"),
+        "vehicle_type": vehicle.get("vehicle_type") or last_seen.get("vehicle_type"),
+        "fuel_type": vehicle.get("fuel_type"),
+        "owner_name": vahan.get("owner_name"),
+        "owner_id": vahan.get("owner_id"),
+
+        # Registration (VAHAN's answer)
+        "registration_date": vahan.get("registration_date"),
+        "registration_expiry_date": vahan.get("valid_till"),
         "registration_status": reg_status,
 
-        # Insurance details (IIB)
-        "insurance_company": (active_policy or {}).get("insurer_name"),
-        "policy_number": (active_policy or {}).get("policy_number"),
-        "insurance_start_date": (active_policy or {}).get("policy_start_date"),
-        "insurance_expiry_date": (active_policy or {}).get("policy_expiry_date"),
+        # Insurance (IIB's answer; policy rows only for INSURER / ADMIN)
+        "insurance_company": iib.get("insurer_name"),
+        "policy_number": iib.get("policy_number"),
+        "insurance_start_date": iib.get("valid_from"),
+        "insurance_expiry_date": iib.get("valid_till"),
         "insurance_status": insurance_status,
-        "policy_history_count": len(iib_data),
-        "policy_history": iib_data,
+        "insurance_evaluated_on": iib.get("evaluated_on"),
+        "policy_history_count": iib.get("policy_count", 0),
+        "policy_history": iib.get("policies", []),
+        "claims": iib.get("claims", []),
 
-        # Theft & Scrapping (Police CCTNS / RVSF)
-        "theft_status": (police_data or {}).get("theft_status", "NONE"),
-        "theft_report_date": (police_data or {}).get("theft_report_date"),
-        "recovery_date": (police_data or {}).get("recovery_date"),
-        "scrapping_status": (police_data or {}).get("scrapping_status", "NONE"),
-        "scrapping_date": (police_data or {}).get("scrapping_date"),
-        "shredding_date": (police_data or {}).get("shredding_date"),
-        "authority_reference": (police_data or {}).get("authority_reference"),
+        # Theft & scrapping (Police's answer; FIRs only for POLICE / ADMIN)
+        "theft_status": police.get("theft_status", "NONE"),
+        "theft_report_date": police.get("theft_report_date"),
+        "recovery_date": police.get("recovery_date"),
+        "scrapping_status": police.get("scrapping_status", "NONE"),
+        "scrapping_date": police.get("scrapping_date"),
+        "shredding_date": police.get("shredding_date"),
+        "authority_reference": police.get("authority_reference"),
+        "firs": police.get("firs", []),
 
-        # Risk & Compliance
+        # Risk & compliance
         "suspicion_status": suspicion_status,
         "risk_level": risk_level,
         "ministry_report_required": ministry_eval["required"],
         "ministry_report_reasons": ministry_eval["reasons"],
-        "ministry_report_status": latest_challan.get("report_status") if latest_challan else None,
-        "ministry_reference": latest_challan.get("ministry_reference") if latest_challan else None,
-        "challans": echallan_data,
+        "ministry_report_status": latest_challan.get("report_status"),
+        "ministry_reference": latest_challan.get("ministry_reference"),
+        "open_challans": echallan.get("open_challans", 0),
+        "challans": echallan.get("challans", []),
 
-        "refreshed_at": now_iso
+        "refreshed_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
     }
-    return dossier
+
 
 def upsert_cache(dossier):
     """Saves the merged dossier into the Data Warehouse cache (mv_vehicle_complete_history)."""
@@ -574,60 +571,26 @@ def get_vehicle(plate_number):
 
 @app.route("/api/v1/vehicles/<plate_number>/trace", methods=["GET"])
 def get_federated_trace(plate_number):
-    """Returns detailed trace of the 5 decomposed API calls and raw payloads."""
+    """The five decomposed questions, where each was answered, and each agency's answer."""
     clean_plate = normalize_plate(plate_number)
     api_results = fetch_all_agency_apis(clean_plate)
-    return jsonify({
-        "plate": clean_plate,
-        "target_host": config.DEFAULT_HOST,
-        "decomposed_queries": {
-            "IIB_IRDAI": {
-                "agency": "Insurance Information Bureau of India",
-                "local_attribute": "registration_no",
-                "endpoint": f"{config.URL_IIB}/api/v1/policies/{clean_plate}",
-                "latency_ms": api_results["iib"]["latency_ms"],
-                "status": api_results["iib"]["status"],
-                "error": api_results["iib"].get("error"),
-                "response": api_results["iib"]["data"] or {"error": api_results["iib"].get("error")}
-            },
-            "MORTH_VAHAN": {
-                "agency": "Ministry of Road Transport and Highways (VAHAN)",
-                "local_attribute": "vehicle_registration_id",
-                "endpoint": f"{config.URL_VAHAN}/api/v1/rc/{clean_plate}",
-                "latency_ms": api_results["vahan"]["latency_ms"],
-                "status": api_results["vahan"]["status"],
-                "error": api_results["vahan"].get("error"),
-                "response": api_results["vahan"]["data"] or {"error": api_results["vahan"].get("error")}
-            },
-            "POLICE_CCTNS": {
-                "agency": "Police Crime & Criminal Tracking Network",
-                "local_attribute": "vehicle_no",
-                "endpoint": f"{config.URL_POLICE}/api/v1/records/{clean_plate}",
-                "latency_ms": api_results["police"]["latency_ms"],
-                "status": api_results["police"]["status"],
-                "error": api_results["police"].get("error"),
-                "response": api_results["police"]["data"] or {"error": api_results["police"].get("error")}
-            },
-            "TRAFFIC_ANPR": {
-                "agency": "Highway Toll ANPR Camera Network",
-                "local_attribute": "plate_number",
-                "endpoint": f"{config.URL_ANPR}/api/v1/captures/{clean_plate}",
-                "latency_ms": api_results["anpr"]["latency_ms"],
-                "status": api_results["anpr"]["status"],
-                "error": api_results["anpr"].get("error"),
-                "response": api_results["anpr"]["data"] or {"error": api_results["anpr"].get("error")}
-            },
-            "MORTH_ECHALLAN": {
-                "agency": "MoRTH e-Challan & Notice Portal",
-                "local_attribute": "vehicle_identifier",
-                "endpoint": f"{config.URL_ECHALLAN}/api/v1/challans/{clean_plate}",
-                "latency_ms": api_results["echallan"]["latency_ms"],
-                "status": api_results["echallan"]["status"],
-                "error": api_results["echallan"].get("error"),
-                "response": api_results["echallan"]["data"] or {"error": api_results["echallan"].get("error")}
-            }
+    trace = {}
+    for key, res in api_results.items():
+        _, trace_key, agency, attribute = AGENCY_LABELS[key]
+        data = res.get("data") or {}
+        trace[trace_key] = {
+            "agency": agency,
+            "local_attribute": attribute,
+            "question": data.get("question"),
+            "computed_at": "agency (verdict push-down)",
+            "endpoint": res["url"],
+            "latency_ms": res["latency_ms"],
+            "status": res["status"],
+            "error": res.get("error"),
+            "response": res["data"] or {"error": res.get("error")},
         }
-    })
+    return jsonify({"plate": clean_plate, "target_host": config.DEFAULT_HOST, "decomposed_queries": trace})
+
 
 @app.route("/api/v1/sync/invalidate", methods=["POST"])
 def invalidate_cache():
