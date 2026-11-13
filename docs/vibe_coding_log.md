@@ -485,4 +485,23 @@ the query, then integrate them with the structured results. Requirements:
   - deleting it gets 403 for police and works for admin.
 - **UI:** the page's JavaScript was run on five live responses and the EROCS reply: no undefined or NaN values.
 
+### P3.5 Plate OCR on real web photos (found in user testing)
+
+**Prompt:** "A clean Delhi plate photo reads as nothing, and a real car photo reads as `DL7C0` instead of the whole
+plate. Fix the browser OCR."
+
+**Found and fixed:**
+- **Small web image, no words.** On a 520 px stock image Tesseract (sparse-text mode) returned no words at all.
+  The browser now tries up to three passes: grayscale upscaled to about 1200 px, the original, and the original read
+  as one block. It stops at the first complete plate, otherwise keeps the best-scoring reading.
+- **Fragment chosen over the plate.** On `DL 7C D 1939`, OCR read D as 0. Then only the fragment `DL7C0` fitted the
+  plate pattern, so it beat `DL7C0 1939`. Now a whole plate (4-digit tail) scores highest, an OCR-slip series
+  (`C0`) still counts as a whole plate, and a short plate-shaped fragment gets less. Same rule in
+  `frontend/assets/js/matching.js` and `matching/ocr.py`.
+
+**Verified:** the same tesseract.js 5.1.1, preprocessing and picker code were replayed in Node on the two photos
+and the five samples. Six of seven read the whole plate (`DL1AB2345`, `DL7C01939`, and four samples); the skewed
+sample reads `01AB1234` as before. Before the fix, three of seven did. OCR and matching tests: 57 pass (3 skipped,
+no server OCR engine installed), plus a new test for the fragment case.
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->
