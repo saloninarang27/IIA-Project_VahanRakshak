@@ -390,6 +390,11 @@ def mark_vehicles_stale(plates):
 matching_api.configure(_fetch_service, on_vehicles_changed=mark_vehicles_stale)
 app.register_blueprint(matching_api.matching_bp)
 
+# Federated context discovery across the five databases (backend/context_api.py)
+from backend import context_api
+context_api.configure(_fetch_service)
+app.register_blueprint(context_api.context_bp)
+
 def _attach_approximate_matches(vehicle):
     """For a plate VAHAN does not know, suggest the registered vehicles it most likely is."""
     if not vehicle or vehicle.get("registration_status") != "UNREGISTERED":
