@@ -338,14 +338,23 @@ DOSSIER_FIELDS = ("vehicle_identifier", "make", "model", "color", "owner_name", 
 
 def search_documents(ctx_result, role, method=DOC_METHOD, k=12):
     """Push the search down to the document store: it ranks its own documents with the query context."""
-    from docsearch.index import context_for_search
+    from docsearch.index import context_for_search, SAME_PLATE
     search_ctx = context_for_search(ctx_result)
+    # No database knows the query's vehicle (e.g. a random plate): there is no context, so only documents that
+    # name the queried plate (exactly or with an OCR slip) or its ids are related - not mere keyword hits.
+    no_context = not ctx_result.get("facts")
+    if no_context:
+        search_ctx["plates"] = (ctx_result.get("parsed", {}).get("seeds") or {}).get("plate") or []
     res = _fetch(f"{config.URL_DOCS}/api/v1/search", "Document store - search", role=role, method="POST",
                  body={"context": search_ctx, "method": method, "k": k})
     data = res.get("data") or {}
+    results = data.get("results", [])
+    if no_context:
+        results = [r for r in results if r["breakdown"].get("ids") or
+                   ((r["breakdown"].get("plate_match") or {}).get("similarity") or 0) >= SAME_PLATE]
     return {"status": res["status"], "endpoint": res["url"], "latency_ms": res["latency_ms"], "error": res.get("error"),
             "method": method, "search_context": search_ctx, "searched": data.get("searched"),
-            "hidden_by_role": data.get("hidden_by_role"), "results": data.get("results", [])}
+            "hidden_by_role": data.get("hidden_by_role"), "no_context": no_context, "results": results}
 
 
 def integrated_query(query, role, method=DOC_METHOD):

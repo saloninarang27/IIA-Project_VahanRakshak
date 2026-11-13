@@ -219,7 +219,9 @@ function renderDocuments(docs) {
     ids ${esc((ctx.ids || []).join(', ') || '—')} · places ${esc((ctx.cities || []).join(', ') || '—')} · vehicle ${esc((ctx.vehicle_words || []).join(' ') || '—')}
     · ${(ctx.terms || []).length} weighted context terms</div>`;
   const top = Math.max(...docs.results.map(r => r.score), 1e-9);
-  box.innerHTML = ctxLine + (docs.results.length ? docs.results.map((r, n) => {
+  const noCtx = docs.no_context ? `<div class="ctx-finding warning">No database holds this vehicle, so there is no context to search with.
+    Only documents that name the queried plate itself are shown${docs.results.length ? '' : ' - none do'}.</div>` : '';
+  box.innerHTML = noCtx + ctxLine + (docs.results.length ? docs.results.map((r, n) => {
     const b = r.breakdown || {};
     const parts = [`text ${b.text}`];
     if (b.plate !== undefined) {
