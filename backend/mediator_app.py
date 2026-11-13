@@ -11,12 +11,13 @@ import os
 import sys
 import json
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, g, has_request_context
 from flask_cors import CORS
 
 # Add project root to sys.path so existing ministry/rules can be imported
@@ -25,6 +26,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import backend.config as config
+from backend import security
 from matching.normalize import normalize_plate
 from ministry.rules import (
     compute_insurance_status,
@@ -38,6 +40,94 @@ from ministry.rules import (
 app = Flask(__name__)
 CORS(app)
 
+# ---------------------------------------------------------------------------
+# Access control: every /api call needs a login token; some need a specific role.
+# The agencies re-check the role themselves (the Mediator signs it into each request).
+# ---------------------------------------------------------------------------
+PUBLIC_PATHS = {"/api/v1/health", "/api/v1/auth/login"}
+_ADMIN = {"ADMIN"}
+_POLICE_ADMIN = {"POLICE", "ADMIN"}
+ACCESS_POLICY = {
+    ("POST", "/api/v1/sql"): _ADMIN,                                  # raw SQL REPL
+    ("GET", "/api/v1/matching/noisy-records"): _ADMIN,                # batch cleansing over whole databases
+    ("POST", "/api/v1/matching/noisy-records"): _ADMIN,
+    ("POST", "/api/v1/matching/cleanse"): _ADMIN,
+    ("GET", "/api/v1/matching/audit"): _ADMIN,
+    ("POST", "/api/v1/matching/evaluation/run"): _ADMIN,
+    ("POST", "/api/v1/matching/index/refresh"): _ADMIN,
+    ("GET", "/api/v1/matching/agency"): _ADMIN,
+    ("POST", "/api/v1/matching/agency"): _ADMIN,
+    ("GET", "/api/v1/fleet/detections"): _POLICE_ADMIN,               # row-level listing of all vehicles
+    ("GET", "/api/v1/echallan"): _POLICE_ADMIN,
+    ("POST", "/api/v1/echallan"): _POLICE_ADMIN,
+    ("PUT", "/api/v1/echallan"): _POLICE_ADMIN,
+}
+RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", 300))
+LOGIN_FAILURES_PER_MINUTE = 5
+_hits = {}
+_hits_lock = threading.Lock()
+
+
+def _count_recent(bucket, add=False):
+    """Events in the last minute for bucket (e.g. client IP); add=True records one more."""
+    now = time.time()
+    with _hits_lock:
+        recent = [t for t in _hits.get(bucket, []) if now - t < 60]
+        if add:
+            recent.append(now)
+        _hits[bucket] = recent
+        return len(recent)
+
+
+def _error(status, message, **extra):
+    return jsonify({"status": "error", "error": message, **extra}), status
+
+
+@app.before_request
+def _access_control():
+    if request.method == "OPTIONS" or not request.path.startswith("/api/") or request.path in PUBLIC_PATHS:
+        return None
+    if _count_recent(("req", request.remote_addr), add=True) > RATE_LIMIT_PER_MINUTE:
+        return _error(429, "Too many requests - slow down.")
+    if request.path == "/api/v1/sync/invalidate":  # webhook from an agency: must be signed, not a user
+        path = request.full_path.rstrip("?") if request.query_string else request.path
+        try:
+            security.verify_signed(request.headers, request.method, path, request.get_data())
+        except PermissionError as e:
+            return _error(401, str(e))
+        return None
+    auth = request.headers.get("Authorization", "")
+    session = security.read_token(auth[7:] if auth.startswith("Bearer ") else "")
+    if not session:
+        return _error(401, "Login required.", login_required=True)
+    g.user, g.role = session["user"], session["role"]
+    allowed = security.route_roles(request.method, request.path, ACCESS_POLICY)
+    if allowed is not None and g.role not in allowed:
+        return _error(403, f"Your role ({g.role}) may not use this function; it needs {' or '.join(sorted(allowed))}.")
+    return None
+
+
+@app.route("/api/v1/auth/login", methods=["POST"])
+def login():
+    if not security.configured():
+        return _error(503, "Security is not configured on the Mediator machine: run  python -m backend.security init-env")
+    if _count_recent(("login-fail", request.remote_addr)) >= LOGIN_FAILURES_PER_MINUTE:
+        return _error(429, "Too many failed logins - wait a minute.")
+    data = request.get_json(force=True, silent=True) or {}
+    user = (data.get("username") or "").strip()
+    role = security.authenticate(user, data.get("password") or "")
+    if not role:
+        _count_recent(("login-fail", request.remote_addr), add=True)
+        return _error(401, "Invalid username or password.")
+    return jsonify({"status": "authenticated", "user": user, "role": role, "token": security.issue_token(user, role),
+                    "expires_in": security.TOKEN_TTL_SECONDS})
+
+
+@app.route("/api/v1/auth/me", methods=["GET"])
+def whoami():
+    return jsonify({"user": g.user, "role": g.role})
+
+
 def get_dwh_conn():
     conn = sqlite3.connect(config.DB_DWH, timeout=10.0)
     conn.row_factory = sqlite3.Row
@@ -47,10 +137,18 @@ def get_dwh_conn():
 # ---------------------------------------------------------------------------
 # HTTP Fetcher with timeout & latency tracking
 # ---------------------------------------------------------------------------
-def _fetch_service(url, service_name):
+def current_role():
+    """Role of the logged-in user making this request (batch jobs outside a request run as ADMIN)."""
+    return (g.get("role") if has_request_context() else None) or "ADMIN"
+
+
+def _fetch_service(url, service_name, role=None, method="GET", body=None):
+    """Signed call to an agency service on behalf of `role` (default: the current user's role)."""
     start = time.time()
+    role = role or current_role()
+    req = security.signed_request(url, method, body, role=role)
+    req.add_header("User-Agent", "Mediator-GlobalSchemaCoordinator/2.0")
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mediator-GlobalSchemaCoordinator/2.0"})
         with urllib.request.urlopen(req, timeout=2.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             elapsed_ms = round((time.time() - start) * 1000, 2)
@@ -97,9 +195,10 @@ def _fetch_service(url, service_name):
             try:
                 from urllib.parse import urlparse
                 import importlib
+                from flask.testing import FlaskClient
                 parsed = urlparse(url)
                 port = parsed.port
-                path = parsed.path
+                path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
                 app_map = {
                     config.PORT_IIB: ("backend.IIB.iib_service", "app"),
                     config.PORT_VAHAN: ("backend.VAHAN.vahan_service", "app"),
@@ -111,8 +210,9 @@ def _fetch_service(url, service_name):
                     mod_name, app_name = app_map[port]
                     mod = importlib.import_module(mod_name)
                     svc_app = getattr(mod, app_name)
-                    with svc_app.test_client() as client:
-                        resp = client.get(path)
+                    with FlaskClient(svc_app, svc_app.response_class) as client:
+                        resp = client.open(path, method=method, headers=dict(req.header_items()),
+                                           data=req.data or b"", content_type="application/json")
                         return {
                             "service": service_name,
                             "url": url,
@@ -145,8 +245,9 @@ def fetch_all_agency_apis(clean_plate):
     }
 
     results = {}
+    role = current_role()
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {k: executor.submit(_fetch_service, u, name) for k, (u, name) in calls.items()}
+        futures = {k: executor.submit(_fetch_service, u, name, role) for k, (u, name) in calls.items()}
         for k, fut in futures.items():
             results[k] = fut.result()
 
@@ -641,11 +742,7 @@ def fleet_cities():
 def issue_echallan():
     """Proxies challan generation to the ECHALLAN service and updates cache."""
     data = request.get_json(force=True)
-    req = urllib.request.Request(
-        f"{config.URL_ECHALLAN}/api/v1/challans",
-        data=json.dumps(data).encode("utf-8"),
-        headers={"Content-Type": "application/json"}
-    )
+    req = security.signed_request(f"{config.URL_ECHALLAN}/api/v1/challans", "POST", data, role=current_role())
     with urllib.request.urlopen(req, timeout=3.0) as resp:
         challan_resp = json.loads(resp.read().decode("utf-8"))
 
@@ -669,7 +766,7 @@ def get_echallans_list():
         params += f"&status={status}"
     url = f"{config.URL_ECHALLAN}/api/v1/challans{params}"
     try:
-        req = urllib.request.Request(url)
+        req = security.signed_request(url, "GET", role=current_role())
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return jsonify(data)
@@ -682,12 +779,7 @@ def update_echallan_status(report_id):
     data = request.get_json(force=True)
     url = f"{config.URL_ECHALLAN}/api/v1/challans/{report_id}/status"
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(data).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="PUT"
-        )
+        req = security.signed_request(url, "PUT", data, role=current_role())
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             res_data = json.loads(resp.read().decode("utf-8"))
             return jsonify(res_data)
@@ -698,30 +790,7 @@ def update_echallan_status(report_id):
 # ---------------------------------------------------------------------------
 # Distributed Interactive SQL REPL Endpoints
 # ---------------------------------------------------------------------------
-REPL_DEFAULT_USER = os.environ.get("REPL_ADMIN_USER", "admin")
-REPL_DEFAULT_PASS = os.environ.get("REPL_ADMIN_PASS", "sentinel2026")
-
-def _verify_repl_credentials(user, pwd):
-    return (user == REPL_DEFAULT_USER and pwd == REPL_DEFAULT_PASS)
-
-@app.route("/api/v1/sql/auth", methods=["POST"])
-def sql_auth():
-    """Validates Operator ID and Password for the interactive SQL REPL."""
-    data = request.get_json(force=True) or {}
-    user = data.get("username", "").strip()
-    pwd = data.get("password", "").strip()
-    if _verify_repl_credentials(user, pwd):
-        return jsonify({
-            "status": "authenticated",
-            "operator": user,
-            "role": "SYSTEM_ADMIN_EVALUATOR",
-            "message": "REPL session unlocked successfully"
-        })
-    return jsonify({
-        "status": "unauthorized",
-        "error": "Invalid Operator ID or Password. Demo credentials are admin / sentinel2026."
-    }), 401
-
+# Access: ADMIN session token only (see ACCESS_POLICY); the agency checks the ADMIN role again.
 @app.route("/api/v1/sql/execute", methods=["POST"])
 def sql_execute():
     """
@@ -729,16 +798,6 @@ def sql_execute():
     Flow: Frontend -> Mediator (Port 5001) -> Microservice (Ports 5002-5006) -> SQLite DB.
     """
     data = request.get_json(force=True) or {}
-    auth = data.get("auth") or {}
-    user = auth.get("username", "").strip()
-    pwd = auth.get("password", "").strip()
-
-    if not _verify_repl_credentials(user, pwd):
-        return jsonify({
-            "status": "unauthorized",
-            "error": "Access Denied: Authentication required to execute SQL across agency databases."
-        }), 401
-
     target = data.get("target", "").strip().lower()
     query = data.get("query", "").strip()
 
@@ -858,11 +917,7 @@ def sql_execute():
     # Remote or Local Microservice API Call
     t0 = time.time()
     try:
-        req = urllib.request.Request(
-            target_info["url"],
-            data=json.dumps({"query": query}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
+        req = security.signed_request(target_info["url"], "POST", {"query": query}, role="ADMIN")
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             raw = resp.read().decode("utf-8")
             res_data = json.loads(raw)
