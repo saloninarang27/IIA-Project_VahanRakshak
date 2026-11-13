@@ -269,20 +269,17 @@
 
       <div style="text-align:left; margin-bottom:1rem;">
         <label style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:0.35rem;">Operator ID / Username</label>
-        <input type="text" id="repl-username" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="admin" value="admin">
+        <input type="text" id="repl-username" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="admin" autocomplete="username">
       </div>
 
       <div style="text-align:left; margin-bottom:1.5rem;">
         <label style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:0.35rem;">Password</label>
-        <input type="password" id="repl-password" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="••••••••••••" value="sentinel2026">
+        <input type="password" id="repl-password" class="search-input" style="width:100%; border-radius:var(--radius-sm);" placeholder="••••••••••••" autocomplete="current-password">
       </div>
 
       <div style="display:flex; flex-direction:column; gap:0.75rem;">
         <button class="btn btn-primary" id="btn-unlock-repl" style="width:100%; padding:0.75rem; font-size:0.95rem;">
           🔓 Authenticate & Unlock REPL
-        </button>
-        <button class="btn btn-secondary btn-sm" id="btn-demo-credentials" style="width:100%;">
-          ⚡ Fill Demo Operator Credentials (admin / sentinel2026)
         </button>
       </div>
     </div>

@@ -49,15 +49,12 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Authentication Handling
+// Authentication Handling: raw SQL needs an ADMIN session (checked again by the Mediator
+// and by the agency service). Only the signed session token is kept, never the password.
 // ---------------------------------------------------------------------------
-function getSavedAuth() {
-  try {
-    const raw = sessionStorage.getItem("repl_auth");
-    return raw ? JSON.parse(raw) : null;
-  } catch (e) {
-    return null;
-  }
+function isAdminSession() {
+  const s = Auth.session();
+  return !!(s && s.role === "ADMIN" && Auth.token());
 }
 
 function initAuth() {
@@ -65,36 +62,35 @@ function initAuth() {
   const workbench = document.getElementById("repl-workbench");
   const statusChip = document.getElementById("auth-status-chip");
   const btnUnlock = document.getElementById("btn-unlock-repl");
-  const btnDemo = document.getElementById("btn-demo-credentials");
   const btnLogout = document.getElementById("btn-logout");
   const errBanner = document.getElementById("auth-error-banner");
 
-  const auth = getSavedAuth();
-  if (auth && auth.username) {
-    showWorkbench(auth.username);
+  if (isAdminSession()) {
+    showWorkbench(Auth.session().user);
   } else {
     showAuthGate();
+    const s = Auth.session();
+    if (s) showAuthError(`You are signed in as ${s.user} (${s.role}). The SQL console needs an ADMIN account.`);
   }
 
   btnUnlock.addEventListener("click", async () => {
     const user = document.getElementById("repl-username").value.trim();
-    const pass = document.getElementById("repl-password").value.trim();
+    const pass = document.getElementById("repl-password").value;
     if (!user || !pass) {
       showAuthError("Please enter both Operator ID and Password.");
       return;
     }
-
     btnUnlock.disabled = true;
     btnUnlock.textContent = "Verifying...";
     errBanner.style.display = "none";
-
     try {
-      const res = await API.verifySqlAuth({ username: user, password: pass });
-      if (res.ok) {
-        sessionStorage.setItem("repl_auth", JSON.stringify({ username: user, password: pass }));
-        showWorkbench(user);
-      } else {
+      const res = await Auth.login(user, pass);
+      if (!res.ok) {
         showAuthError(res.data.error || "Authentication failed: Invalid credentials.");
+      } else if (res.data.role !== "ADMIN") {
+        showAuthError(`${user} is a ${res.data.role} account. The SQL console needs an ADMIN account.`);
+      } else {
+        location.reload();
       }
     } catch (err) {
       showAuthError(`Network error communicating with Mediator: ${err.message}`);
@@ -104,15 +100,9 @@ function initAuth() {
     }
   });
 
-  btnDemo.addEventListener("click", () => {
-    document.getElementById("repl-username").value = "admin";
-    document.getElementById("repl-password").value = "sentinel2026";
-    btnUnlock.click();
-  });
-
   btnLogout.addEventListener("click", () => {
-    sessionStorage.removeItem("repl_auth");
-    showAuthGate();
+    Auth.logout();
+    location.reload();
   });
 
   function showAuthError(msg) {
@@ -247,8 +237,7 @@ function initActionButtons() {
 // Query Execution & Telemetry Rendering
 // ---------------------------------------------------------------------------
 async function runQuery() {
-  const auth = getSavedAuth();
-  if (!auth) {
+  if (!isAdminSession()) {
     alert("Session expired. Please unlock the REPL console again.");
     location.reload();
     return;
@@ -276,7 +265,6 @@ async function runQuery() {
 
   try {
     const payload = {
-      auth: auth,
       target: currentTarget,
       query: query
     };
