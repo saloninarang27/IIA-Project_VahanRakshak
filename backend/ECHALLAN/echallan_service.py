@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from backend import security
 from matching.sources import register_match_endpoint
 from backend.verdicts import register_verdict_endpoint
+from backend.context_engine import register_context_endpoint
 import urllib.request
 import json
 
@@ -275,6 +276,8 @@ def execute_sql():
 
 # The agency answers the Mediator's question itself (verdict push-down, backend/verdicts.py)
 register_verdict_endpoint(app, "ECHALLAN", get_db)
+# ... and discovers context in its own tables by following its FK -> PK graph (backend/context_engine.py)
+register_context_endpoint(app, "ECHALLAN", get_db)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT_ECHALLAN", 5006))
