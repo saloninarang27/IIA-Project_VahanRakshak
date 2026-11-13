@@ -9,10 +9,16 @@ agency: table, identifier column, primary key, the columns that describe the veh
 agency-data cleanser and the legacy in-process mediator (mediator/identifier_mapper.py)
 all read this one map.
 
-Each agency microservice exposes the distinct identifiers it holds. The Mediator
-fetches all five in parallel and merges them into one reference index keyed by the
-normalised plate, so a reading is matched against every plate known to ANY agency,
-and each candidate records which databases contain it.
+Need-to-know matching (push-down): for a normal plate search the Mediator sends the
+noisy plate to every agency's POST /api/v1/match. Each agency scores its OWN plates
+and returns only the rows at or above the candidate threshold (floor 0.75, at most
+300 rows), so no agency's plate list ever leaves it. The candidate rows are merged
+into one small index keyed by the normalised plate; because assess_record only ever
+looks at candidates above the threshold, the decision is identical to matching
+against the full list. Each candidate records which databases contain it.
+
+The full identifier lists (GET /identifiers, /registry/index) are ADMIN-only and used
+only by the batch cleansing and evaluation jobs.
 
 The SQL here is only the Mediator's offline fallback (reading a local replica file when
 a service is unreachable); the services run the same projection themselves.
@@ -86,9 +92,9 @@ def _read_local(db_path, sql):
         conn.close()
 
 
-def fetch_source_rows(fetch_service):
+def fetch_source_rows(fetch_service, role="ADMIN"):
     """
-    Pull identifier rows from all five services in parallel.
+    Pull the FULL identifier rows from all five services in parallel (ADMIN-only batch jobs).
     Returns {key: {"rows": [...] | None, "via": "API" | "LOCAL_REPLICA" | "UNAVAILABLE", "error"}}.
     """
     from concurrent.futures import ThreadPoolExecutor
@@ -97,7 +103,8 @@ def fetch_source_rows(fetch_service):
         key = source["key"]
         result = {"rows": None, "via": "UNAVAILABLE", "error": None}
         if fetch_service is not None:
-            res = fetch_service(source["base_url"] + source["identifiers_path"], f"{source['label']} - identifiers")
+            res = fetch_service(source["base_url"] + source["identifiers_path"], f"{source['label']} - identifiers",
+                                role=role)
             data = res.get("data") or {}
             rows = data.get("vehicles") if key == "VAHAN" else data.get("identifiers")
             if res["status"] == 200 and rows is not None:
@@ -105,6 +112,73 @@ def fetch_source_rows(fetch_service):
             result["error"] = res.get("error") or f"HTTP {res['status']}"
         try:
             rows = _read_local(source["local_db"], source["fallback_sql"])
+        except sqlite3.Error as e:
+            rows, result["error"] = None, str(e)
+        if rows is not None:
+            result.update(rows=rows, via="LOCAL_REPLICA")
+        return key, result
+
+    with ThreadPoolExecutor(max_workers=len(SOURCES)) as pool:
+        return dict(pool.map(one, SOURCES))
+
+
+# ---------------------------------------------------------------------------
+# Push-down matching
+# ---------------------------------------------------------------------------
+MIN_PUSHDOWN_THRESHOLD = 0.75   # an agency never returns plates less similar than this
+MAX_PUSHDOWN_ROWS = 300         # nor more than this many per request (seeded plates are very alike)
+
+
+def _row_plate(key, row):
+    return _plate(row.get("vehicle_registration_id") if key == "VAHAN" else row.get("plate"))
+
+
+def match_rows(key, rows, plate, threshold, method):
+    """The rows of one agency whose plate is a candidate for `plate` (same gate as find_candidates)."""
+    from matching.matcher import find_candidates
+    threshold = max(MIN_PUSHDOWN_THRESHOLD, float(threshold))
+    mini = [{"plate": p, "row": r} for r in rows for p in [_row_plate(key, r)] if p]
+    return [c["row"] for c in find_candidates(plate, mini, method=method, threshold=threshold, limit=MAX_PUSHDOWN_ROWS)]
+
+
+def local_match(key, plate, threshold, method):
+    source = SOURCES_BY_KEY[key]
+    return match_rows(key, _read_local(source["local_db"], source["fallback_sql"]) or [], plate, threshold, method)
+
+
+def register_match_endpoint(app, key):
+    """Add POST /api/v1/match to an agency service: candidates for one plate, never the whole list."""
+    from flask import jsonify, request
+    from matching.matcher import DEFAULT_METHOD, DEFAULT_CANDIDATE_THRESHOLD
+
+    @app.route("/api/v1/match", methods=["POST"])
+    def match_identifiers():
+        body = request.get_json(force=True, silent=True) or {}
+        if not _plate(body.get("plate")):
+            return jsonify({"status": "error", "error": "plate is required"}), 400
+        threshold = max(MIN_PUSHDOWN_THRESHOLD, float(body.get("threshold") or DEFAULT_CANDIDATE_THRESHOLD))
+        rows = local_match(key, body["plate"], threshold, body.get("method") or DEFAULT_METHOD)
+        return jsonify({"agency": key, "threshold": threshold, "count": len(rows),
+                        ("vehicles" if key == "VAHAN" else "identifiers"): rows})
+
+
+def fetch_candidate_rows(fetch_service, plate, threshold, method, role):
+    """Ask every agency for its candidates for one plate, in parallel. Same shape as fetch_source_rows."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(source):
+        key = source["key"]
+        result = {"rows": None, "via": "UNAVAILABLE", "error": None}
+        if fetch_service is not None:
+            res = fetch_service(source["base_url"] + "/api/v1/match", f"{source['label']} - match", role=role,
+                                method="POST", body={"plate": plate, "threshold": threshold, "method": method})
+            data = res.get("data") or {}
+            rows = data.get("vehicles") if key == "VAHAN" else data.get("identifiers")
+            if res["status"] == 200 and rows is not None:
+                return key, {"rows": rows, "via": "API", "error": None}
+            result["error"] = res.get("error") or f"HTTP {res['status']}"
+        try:  # replica on this machine (services co-located): still only the candidates are used
+            rows = local_match(key, plate, threshold, method) if os.path.exists(source["local_db"]) else None
         except sqlite3.Error as e:
             rows, result["error"] = None, str(e)
         if rows is not None:
