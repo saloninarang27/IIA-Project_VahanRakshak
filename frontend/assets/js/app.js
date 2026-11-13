@@ -81,13 +81,14 @@ async function checkSystemHealth() {
   try {
     const health = await API.getHealth();
     if (health.status === 'UP') {
-      const allOnline = Object.values(health.services).every(s => s.online);
-      if (allOnline) {
-        pill.innerHTML = `<span class="status-dot"></span> 5 Services Online (${health.cache_records_count} Cached)`;
+      const services = Object.values(health.services);
+      const online = services.filter(s => s.online).length;
+      if (online === services.length) {
+        pill.innerHTML = `<span class="status-dot"></span> ${online} Services Online (${health.cache_records_count} Cached)`;
         pill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
         pill.style.color = '#10b981';
       } else {
-        pill.innerHTML = `<span class="status-dot" style="background:#f59e0b;box-shadow:0 0 8px #f59e0b;"></span> Partial Outage`;
+        pill.innerHTML = `<span class="status-dot" style="background:#f59e0b;box-shadow:0 0 8px #f59e0b;"></span> Partial Outage: ${online}/${services.length} online`;
         pill.style.borderColor = 'rgba(245, 158, 11, 0.3)';
         pill.style.color = '#f59e0b';
       }

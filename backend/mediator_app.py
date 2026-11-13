@@ -420,7 +420,8 @@ def health():
         "vahan": f"{config.URL_VAHAN}/api/v1/health",
         "police": f"{config.URL_POLICE}/api/v1/health",
         "anpr": f"{config.URL_ANPR}/api/v1/health",
-        "echallan": f"{config.URL_ECHALLAN}/api/v1/health"
+        "echallan": f"{config.URL_ECHALLAN}/api/v1/health",
+        "docs": f"{config.URL_DOCS}/api/v1/health",
     }
     status_report = {}
     with ThreadPoolExecutor(max_workers=5) as executor:
