@@ -249,6 +249,44 @@ Remove the hard-coded REPL password. Keep all phase-1/2 features and tests worki
 - the audit table cannot be read or changed through SQL
 - the e-Challan webhook still invalidates the cache
 
+### P3.0b Each agency computes its own answer (verdict push-down)
+
+**Prompt:** "The system is still centralised for one vehicle. When a challan officer photographs a car and asks
+'is it insured?', the mediator pulls the policy rows and decides itself. Make it distributed:
+- the mediator asks each database server a question, and the server computes the result and sends only the answer
+- detail rows go only to the role that needs them
+- the answers must be exactly what the mediator computed before"
+
+**Generated:**
+- **`backend/verdicts.py`:** `GET /api/v1/verdict/<plate>` on every agency, using the same rule functions, now run
+  at the agency:
+  - IIB "insured on <date>?"
+  - VAHAN "registered and valid?"
+  - Police "stolen or scrapped?"
+  - ANPR "seen on the road?"
+  - e-Challan "open challans?"
+- **Mediator:** `fetch_all_agency_apis` asks the five questions. ANPR's last-sighting date is passed to IIB, so
+  insurance is judged on the day the car was seen. `merge_to_global_dossier` only combines the answers into risk
+  and reporting. The trace shows each agency's question and answer.
+- **Raw rows by role:** policy rows to INSURER/ADMIN; FIRs, sightings and challans to POLICE/ADMIN.
+- **`tests/test_verdicts.py`** (5 tests).
+
+**Found while building:**
+- **A role-policy bug in our own security code:** an exact-path rule (`/captures$`) and a prefix rule
+  (`/captures`) had the same length, so the less strict one won. Exact rules now win.
+- **Slow tests:** on Windows every refused connection takes about 2 s, which made the new test 6.5 minutes.
+  Under pytest, agency calls now go in-process first: the whole suite dropped from 2:49 to 1:51.
+- **Behaviour change:** the dossier now shows the *latest* challan of a vehicle; the old code showed the oldest.
+
+**Verified:**
+- **Same answers:** 91 vehicles (all demo vehicles, every 25th vehicle and an unregistered plate) give the same
+  insurance, registration, theft and risk result as the old central evaluation.
+- **Tests:** 152 pass (3 skipped).
+- **Live over HTTP:**
+  - police see the owner and the FIR but no policy rows
+  - the insurer sees policy and claim rows with a masked owner
+  - IIB's audit log shows it was asked `/verdict/DL01AB1004?on=2026-09-12` and answered with about 800 bytes
+
 ### P3.1 Each database expanded to 5–6 related tables (rubric 1)
 
 **Prompt:** "Expand every agency database to 4–6 tables, so that a vehicle's information is distributed over tables
