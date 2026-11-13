@@ -16,6 +16,10 @@ Federated context discovery (Mediator blueprint, POST /api/v1/context/query).
 4. Accumulate: facts from later rounds are discounted (ROUND_DECAY), weak facts are dropped
    (MIN_FACT_SCORE), and the surviving facts are summarised into entities (vehicles, people, FIRs,
    claims, places, events, dates) and weighted context terms - the input of the unstructured search.
+   A context term's weight is   relevance of its best fact  x  SCORE term weight TW = POP * DIFF
+   (computed by the agency that holds it, normalised to the strongest term): a term must be both
+   about the query and distinctive in its database. TERM_WEIGHTING = "relevance" drops the TW factor;
+   docsearch/evaluation.py measures both.
 """
 import re
 import time
@@ -39,6 +43,7 @@ EXPAND_MIN = 0.5          # only keys from facts at least this relevant are foll
 MIN_FACT_SCORE = 0.25     # facts below this are not part of the context
 MAX_FACTS = 60
 MAX_ROUNDS = 3
+TERM_WEIGHTING = "score"  # "score": relevance x POP*DIFF  |  "relevance": relevance only
 
 _fetch = None
 
@@ -244,29 +249,37 @@ def federate(parsed_seeds, terms, role, max_rounds=MAX_ROUNDS, words=()):
     return kept, rounds, focus
 
 
-def accumulate(facts, terms):
+def accumulate(facts, terms, weighting=None):
     """Entities and weighted context terms from the kept facts."""
-    entities = {k: {} for k in ENTITY_COLUMNS}
+    weighting = weighting or TERM_WEIGHTING
+    entities, tws = {k: {} for k in ENTITY_COLUMNS}, {}
     for f in facts:
         for group, cols in ENTITY_COLUMNS.items():
             for col in cols:
                 v = f["row"].get(col)
                 if v in IGNORED_EVENT_VALUES or (isinstance(v, str) and "*" in v):
                     continue
+                tw = (f.get("term_weights") or {}).get(col)
                 v = str(v)[:10] if group == "dates" else str(v)
                 entities[group][v] = round(max(entities[group].get(v, 0), f["score"]), 3)
-    entities = {g_: [{"value": v, "weight": w} for v, w in sorted(vals.items(), key=lambda x: -x[1])]
+                if tw is not None:
+                    tws[v] = max(tws.get(v, 0), tw)
+    entities = {g_: [{"value": v, "weight": w, "tw": tws.get(v)} for v, w in sorted(vals.items(), key=lambda x: -x[1])]
                 for g_, vals in entities.items() if vals}
     weighted = {}
     for t in terms:
         weighted[t.lower()] = 1.0
-    for group, items in entities.items():
-        if group in ("dates", "people"):     # dates are matched separately; names are not search terms
-            continue
-        for item in items[:12]:
-            v = item["value"].lower().replace("_", " ")
-            weighted[v] = round(max(weighted.get(v, 0), item["weight"]), 3)
-    return entities, [{"term": t, "weight": w} for t, w in sorted(weighted.items(), key=lambda x: -x[1])]
+    candidates = [(group, item) for group, items in entities.items()
+                  if group not in ("dates", "people")      # dates are matched separately; names are not search terms
+                  for item in items[:12]]
+    top_tw = max((item["tw"] or 0 for _, item in candidates), default=0) or 1
+    for group, item in candidates:
+        w = item["weight"]
+        if weighting == "score" and item["tw"] is not None:
+            w *= item["tw"] / top_tw
+        v = item["value"].lower().replace("_", " ")
+        weighted[v] = round(max(weighted.get(v, 0), w), 3)
+    return entities, [{"term": t, "weight": w} for t, w in sorted(weighted.items(), key=lambda x: -x[1]) if w > 0]
 
 
 def discover_context(query, role, max_rounds=MAX_ROUNDS):
@@ -297,7 +310,7 @@ def discover_context(query, role, max_rounds=MAX_ROUNDS):
         "facts_by_agency": by_agency,
         "entities": entities,
         "context_terms": context_terms,
-        "settings": {"round_decay": ROUND_DECAY, "expand_min": EXPAND_MIN, "min_fact_score": MIN_FACT_SCORE,
+        "settings": {"term_weighting": TERM_WEIGHTING, "round_decay": ROUND_DECAY, "expand_min": EXPAND_MIN, "min_fact_score": MIN_FACT_SCORE,
                      "max_facts": MAX_FACTS},
         "latency_ms": round((time.time() - started) * 1000, 1),
     }
@@ -371,12 +384,28 @@ def get_document(doc_id):
     return jsonify(res.get("data") or {"error": res.get("error")}), res["status"]
 
 
+def link_document(body):
+    """EROCS direction (document -> database): which database entities does this text discuss?
+    Plates are read however they are written and resolved with the phase-2 matcher (push-down);
+    FIR / policy / claim numbers, cities, dates and events are read as they are."""
+    from docsearch.text import entities
+    ent = entities(body)
+    plates, notes = _resolve_plates(ent["plates"]) if ent["plates"] else ([], [])
+    return {"vehicles": sorted(set(plates)), "plate_resolution": notes, "firs": ent["firs"],
+            "policies": ent["policies"], "claims": ent["claims"], "cities": ent["cities"],
+            "dates": ent["dates"], "events": ent["events"], "plate_endings": ent["plate_endings"]}
+
+
 @context_bp.route("/documents", methods=["POST"])
 def add_document():
-    """Add a free-text document (e.g. a new tip-off) - searchable immediately."""
-    res = _fetch(f"{config.URL_DOCS}/api/v1/documents", "Document store", role=g.get("role"), method="POST",
-                 body=request.get_json(force=True, silent=True) or {})
-    return jsonify(res.get("data") or {"error": res.get("error")}), res["status"]
+    """Add a free-text document (e.g. a new tip-off) - searchable immediately - and say which
+    database entities it discusses."""
+    body = request.get_json(force=True, silent=True) or {}
+    res = _fetch(f"{config.URL_DOCS}/api/v1/documents", "Document store", role=g.get("role"), method="POST", body=body)
+    data = res.get("data") or {"error": res.get("error")}
+    if res["status"] == 201 and isinstance(data, dict):
+        data["linked_entities"] = link_document(body.get("body") or "")
+    return jsonify(data), res["status"]
 
 
 @context_bp.route("/documents/<int:doc_id>", methods=["DELETE"])

@@ -88,13 +88,14 @@ def run_evaluation(n_queries=60, write=True):
     os.environ.setdefault("FEDERATION_SECRET", "evaluation-only-" + os.urandom(8).hex())
     import backend.mediator_app as mediator
     from flask import g
-    from backend.context_api import discover_context
+    from backend.context_api import accumulate, discover_context
     mediator.IN_PROCESS = True          # agencies called in-process: no services need to be running
 
     docs, truth = load_corpus()
     index = DocIndex(docs)
     queries = build_queries(truth, n_queries)
-    sums = {m: {} for m in METHODS}
+    variants = list(METHODS) + [m + "/relevance_weights" for m in METHODS if m != "bm25_query"]
+    sums = {m: {} for m in variants}
     per_query = []
     started = time.time()
     for q in queries:
@@ -102,22 +103,25 @@ def run_evaluation(n_queries=60, write=True):
             g.role = "ADMIN"
             ctx = discover_context(q["query"], "ADMIN")
         sctx = context_for_search(ctx)
+        # the same context with context terms weighted by relevance only (no SCORE POP*DIFF factor)
+        rctx = dict(sctx, terms=accumulate(ctx["facts"], ctx["parsed"]["terms"], "relevance")[1])
         relevant = truth.get(q["plate"], set())
         # hard negatives: documents about another car whose plate differs in one character
         decoys = {d for p, ids in truth.items() if p != q["plate"] and len(p) == len(q["plate"])
                   and sum(a != b for a, b in zip(p, q["plate"])) == 1 for d in ids}
         row = {"query": q["query"], "plate": q["plate"], "relevant": len(relevant),
                "context_plates": sctx["plates"]}
-        for m in METHODS:
-            ranked = [r["doc_id"] for r in index.search(sctx, m, k=10)]
+        for m in variants:
+            base, _, alt = m.partition("/")
+            ranked = [r["doc_id"] for r in index.search(rctx if alt else sctx, base, k=10)]
             met = _metrics(ranked, relevant, decoys)
             row[m] = met
             for k, v in met.items():
                 sums[m][k] = sums[m].get(k, 0.0) + v
         per_query.append(row)
     n = len(queries)
-    methods = {m: {k: round(v / n, 3) for k, v in sums[m].items()} for m in METHODS}
-    best = max(METHODS, key=lambda m: (methods[m]["ndcg@10"], methods[m]["mrr"]))
+    methods = {m: {k: round(v / n, 3) for k, v in sums[m].items()} for m in variants}
+    best = max(variants, key=lambda m: (methods[m]["ndcg@10"], methods[m]["mrr"]))
     report = {"queries": n, "documents": len(docs), "methods": methods, "selected_method": best,
               "duration_s": round(time.time() - started, 1), "per_query": per_query}
     if write:
@@ -129,8 +133,8 @@ def run_evaluation(n_queries=60, write=True):
 if __name__ == "__main__":
     rep = run_evaluation()
     print(f"{rep['queries']} labelled queries over {rep['documents']} documents ({rep['duration_s']} s)\n")
-    print(f"{'method':<18}{'P@5':>7}{'R@10':>7}{'MRR':>7}{'nDCG@10':>9}{'hard-neg@5':>12}{'decoy>rel':>11}")
+    print(f"{'method':<38}{'P@5':>7}{'R@10':>7}{'MRR':>7}{'nDCG@10':>9}{'hard-neg@5':>12}{'decoy>rel':>11}")
     for m, v in rep["methods"].items():
-        print(f"{m:<18}{v['p@5']:>7}{v['r@10']:>7}{v['mrr']:>7}{v['ndcg@10']:>9}{v['hard_neg@5']:>12}"
+        print(f"{m:<38}{v['p@5']:>7}{v['r@10']:>7}{v['mrr']:>7}{v['ndcg@10']:>9}{v['hard_neg@5']:>12}"
               f"{v['decoy_above_relevant']:>11}")
     print(f"\nselected: {rep['selected_method']}")
