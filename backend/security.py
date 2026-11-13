@@ -224,15 +224,16 @@ def route_roles(method: str, path: str, policy: dict):
     """
     Roles allowed for (method, path); None = any authenticated role. Policy keys are
     (METHOD, path_prefix); a prefix ending in "$" matches that exact path only.
-    The longest matching prefix wins.
+    The longest matching prefix wins; an exact rule beats a prefix rule for the same path.
     """
     best, allowed = -1, None
     for (m, prefix), roles in policy.items():
         exact = prefix.endswith("$")
         p = prefix.rstrip("$")
         hit = path == p if exact else (path == p or path.startswith(p.rstrip("/") + "/"))
-        if m == method and hit and len(p) > best:
-            best, allowed = len(p), roles
+        weight = len(p) + (0.5 if exact else 0)   # an exact rule beats a prefix rule of the same path
+        if m == method and hit and weight > best:
+            best, allowed = weight, roles
     return allowed
 
 
