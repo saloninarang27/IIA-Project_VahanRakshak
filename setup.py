@@ -9,7 +9,7 @@ the data warehouse, and refreshes the materialized-view tables. After this
 completes, `streamlit run app.py` and `pytest` are both ready to use.
 """
 import db
-from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry, seed_relations
+from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry, seed_relations, seed_documents
 from etl.pipeline import run_pipeline
 from dwh.refresh_views import refresh_all_views
 
@@ -25,6 +25,7 @@ def main():
     seed_theft_scrap.seed()
     seed_ministry.seed()
     seed_relations.seed()   # related tables (FK -> PK) of every agency database
+    seed_documents.seed()   # unstructured documents built from the seeded records
 
     print("\n[3/4] Running ETL pipeline (extract -> transform -> load into DWH)...")
     run_pipeline()
@@ -38,7 +39,8 @@ def main():
     import backend.config as bc
     import os
     for src, dst in ((c.DB_INSURANCE, bc.DB_IIB), (c.DB_REGISTRATION, bc.DB_VAHAN), (c.DB_THEFT_SCRAP, bc.DB_POLICE),
-                     (c.DB_CAPTURE, bc.DB_ANPR), (c.DB_MINISTRY, bc.DB_ECHALLAN), (c.DB_DWH, bc.DB_DWH)):
+                     (c.DB_CAPTURE, bc.DB_ANPR), (c.DB_MINISTRY, bc.DB_ECHALLAN), (c.DB_DWH, bc.DB_DWH),
+                     (c.DB_DOCS, bc.DB_DOCS)):
         # Remove the old database's WAL / shared-memory side files first: SQLite would otherwise
         # replay the previous run's pending writes onto the fresh copy and corrupt it.
         for suffix in ("-wal", "-shm"):

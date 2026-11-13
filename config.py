@@ -22,6 +22,7 @@ DB_REGISTRATION = os.path.join(DATA_DIR, "registration.db")
 DB_THEFT_SCRAP = os.path.join(DATA_DIR, "theft_scrap.db")
 DB_MINISTRY = os.path.join(DATA_DIR, "ministry.db")
 DB_DWH = os.path.join(DATA_DIR, "vehicle_dwh.db")
+DB_DOCS = os.path.join(DATA_DIR, "documents.db")   # unstructured documents (phase 3)
 
 SCHEMA_FILES = {
     DB_CAPTURE: os.path.join(SCHEMA_DIR, "vehicle_capture_schema.sql"),
@@ -30,6 +31,7 @@ SCHEMA_FILES = {
     DB_THEFT_SCRAP: os.path.join(SCHEMA_DIR, "theft_scrap_schema.sql"),
     DB_MINISTRY: os.path.join(SCHEMA_DIR, "ministry_schema.sql"),
     DB_DWH: os.path.join(SCHEMA_DIR, "dwh_schema.sql"),
+    DB_DOCS: os.path.join(SCHEMA_DIR, "documents_schema.sql"),
 }
 
 # Reference "today" used for computing insurance/registration validity.

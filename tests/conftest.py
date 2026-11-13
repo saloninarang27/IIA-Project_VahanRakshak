@@ -42,7 +42,7 @@ _mediator_app.test_client_class = security.signed_client_class("ADMIN", bearer=T
 import pytest
 
 import db
-from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry, seed_relations
+from seed import seed_capture, seed_insurance, seed_registration, seed_theft_scrap, seed_ministry, seed_relations, seed_documents
 from etl.pipeline import run_pipeline
 from dwh.refresh_views import refresh_all_views
 
@@ -56,6 +56,7 @@ def bootstrap_full_dataset():
     seed_theft_scrap.seed()
     seed_ministry.seed()
     seed_relations.seed()
+    seed_documents.seed()
     run_pipeline()
     refresh_all_views()
     yield
