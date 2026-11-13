@@ -49,6 +49,7 @@ PORT_VAHAN = int(os.environ.get("PORT_VAHAN", 5003))
 PORT_POLICE = int(os.environ.get("PORT_POLICE", 5004))
 PORT_ANPR = int(os.environ.get("PORT_ANPR", 5005))
 PORT_ECHALLAN = int(os.environ.get("PORT_ECHALLAN", 5006))
+PORT_DOCS = int(os.environ.get("PORT_DOCS", 5007))
 
 # ---------------------------------------------------------------------------
 # Host & Service URLs Configuration
@@ -63,6 +64,7 @@ HOST_VAHAN = os.environ.get("HOST_VAHAN") or DEFAULT_HOST
 HOST_POLICE = os.environ.get("HOST_POLICE") or DEFAULT_HOST
 HOST_ANPR = os.environ.get("HOST_ANPR") or DEFAULT_HOST
 HOST_ECHALLAN = os.environ.get("HOST_ECHALLAN") or DEFAULT_HOST
+HOST_DOCS = os.environ.get("HOST_DOCS") or DEFAULT_HOST
 HOST_MEDIATOR = os.environ.get("HOST_MEDIATOR") or "127.0.0.1"
 
 URL_IIB = os.environ.get("URL_IIB") or f"http://{HOST_IIB}:{PORT_IIB}"
@@ -70,6 +72,7 @@ URL_VAHAN = os.environ.get("URL_VAHAN") or f"http://{HOST_VAHAN}:{PORT_VAHAN}"
 URL_POLICE = os.environ.get("URL_POLICE") or f"http://{HOST_POLICE}:{PORT_POLICE}"
 URL_ANPR = os.environ.get("URL_ANPR") or f"http://{HOST_ANPR}:{PORT_ANPR}"
 URL_ECHALLAN = os.environ.get("URL_ECHALLAN") or f"http://{HOST_ECHALLAN}:{PORT_ECHALLAN}"
+URL_DOCS = os.environ.get("URL_DOCS") or f"http://{HOST_DOCS}:{PORT_DOCS}"
 URL_MEDIATOR = os.environ.get("URL_MEDIATOR") or f"http://{HOST_MEDIATOR}:{PORT_MEDIATOR}"
 
 # ---------------------------------------------------------------------------
@@ -80,6 +83,7 @@ DB_VAHAN = os.path.join(BASE_DIR, "VAHAN", "parivahan_vahan.db")
 DB_POLICE = os.path.join(BASE_DIR, "POLICE_CCTNS", "theft_scrap.db")
 DB_ANPR = os.path.join(BASE_DIR, "ANPR_CAMERA", "vehicle_capture.db")
 DB_ECHALLAN = os.path.join(BASE_DIR, "ECHALLAN", "ministry_echallan.db")
+DB_DOCS = os.path.join(BASE_DIR, "DOCS", "documents.db")   # unstructured documents (phase 3)
 DB_DWH = os.path.join(BASE_DIR, "dwh", "warehouse_dwh.db")
 DB_DATA_QUALITY = os.path.join(BASE_DIR, "dwh", "data_quality.db")  # noisy-record staging + correction audit trail
 

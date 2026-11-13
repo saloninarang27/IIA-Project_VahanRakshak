@@ -25,6 +25,7 @@ ALL_SERVICES = {
     "police": ("Police CCTNS & RVSF", [sys.executable, os.path.join(ROOT_DIR, "backend", "POLICE_CCTNS", "cctns_service.py")], b_config.PORT_POLICE),
     "anpr": ("Traffic ANPR Network", [sys.executable, os.path.join(ROOT_DIR, "backend", "ANPR_CAMERA", "anpr_service.py")], b_config.PORT_ANPR),
     "echallan": ("MoRTH e-Challan Portal", [sys.executable, os.path.join(ROOT_DIR, "backend", "ECHALLAN", "echallan_service.py")], b_config.PORT_ECHALLAN),
+    "docs": ("Unstructured Document Store", [sys.executable, os.path.join(ROOT_DIR, "backend", "DOCS", "docs_service.py")], b_config.PORT_DOCS),
     "mediator": ("Central Mediator (Global Schema)", [sys.executable, os.path.join(ROOT_DIR, "backend", "mediator_app.py")], b_config.PORT_MEDIATOR),
     "frontend": ("Frontend Web Application", [sys.executable, os.path.join(ROOT_DIR, "frontend", "server.py")], b_config.PORT_FRONTEND),
 }
