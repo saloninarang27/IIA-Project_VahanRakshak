@@ -386,4 +386,58 @@ must discover the context itself by following its FK → PK relationships. Requi
   - With the "ANPR laptop" stopped, ANPR showed 503 and the other four still answered.
 - **Live data:** a claim inserted live appears in the context at once and is gone after it is deleted.
 
+### P3.3 Unstructured documents searched with the query context and integrated (rubric 3)
+
+**Prompt:** "Add unstructured data and use the query context from step 2 to find the documents most correlated with
+the query, then integrate them with the structured results. Requirements:
+- **Realistic documents:** free text, with plates written the way people and OCR write them, and decoys about
+  other cars with similar plates.
+- **Method choice:** justify the search method by measurement, as for plate matching in phase 2.
+- **Integration:** show where the documents add to or contradict the databases.
+- **Security and live demo:** keep the security model, and make live insert / delete possible."
+
+**Generated:**
+- **Data:** `schemas/documents_schema.sql` (free text, no vehicle column; `ground_truth` for evaluation only) and
+  `seed/seed_documents.py`, which writes 1,333 documents from the seeded records.
+- **Text reading:** `docsearch/text.py` reads plates in any written form, ids, places, dates and events from text.
+  It is also used by the query parser.
+- **Search:** `docsearch/index.py` implements BM25 and the context + entity score (phase-2 OCR similarity for
+  plates).
+- **Evaluation:** `docsearch/evaluation.py` runs 59 labelled queries through the full federated pipeline;
+  `context_entities` is selected (nDCG@10 0.33 → 0.86 → 1.00).
+- **Integration:** `docsearch/integrate.py` builds the timeline and the findings (new lead, status conflict,
+  unreported theft, unclaimed incident, no FIR, noisy plate).
+- **Document Store service** `backend/DOCS/docs_service.py` (port 5007): signed calls only, documents visible by
+  role, search pushed down to it, live add (any role) and delete (ADMIN).
+- **Mediator:** `POST /api/v1/context/integrated` and the document proxies.
+- **UI:** an integrated answer and a document list (highlighted snippets, score breakdown, method selector,
+  add-document box) on the Context Discovery page.
+- **Docs:** `docs/unstructured_integration.md`, `tests/test_documents.py` (8 tests), the README phase-3 section.
+
+**Found while testing (and fixed):**
+- **Plate pattern too loose.** It started a match at an ordinary word ("vehicle DL-01-…" was read from "ve"), so
+  hyphenated plates were missed, and our own ids (`POL100004`) were read as plates. It now follows the plate
+  structure (state, district, series, number), and ids are excluded.
+- **Decoys attached to the wrong car.** The first corpus put the "decoy" documents for one demo car on another
+  demo car, and duplicated some officer notes.
+- **Close plates treated as the same car.** Documents about another car with a merely close plate
+  (`DL01AB1154`) were attached to the main car as "noisy plate". A document now belongs to the car only for an
+  exact plate or a pure OCR slip.
+- **Wrong "no claim" and "no FIR" findings.** Claims were looked up by plate (claim rows hold `policy_id`), and
+  absence was judged even when the role sees those tables only as keys. Both fixed.
+- **Decoys ranked too high.** Measured: at full weight, a near-plate decoy outranked a relevant document in 5 of
+  59 queries (same make, model and colour). Near plates are now a weak hint (× 0.3), and this dropped to 0.
+- **Highlighter nesting:** it marked words inside words (`[[Safe[[Road]]]]`); now whole words only.
+- **Report overwritten:** the test run overwrote the 59-query evaluation report; it now has a `write` flag.
+
+**Verified:**
+- **Tests:** 170 pass (3 skipped).
+- **Four machine addresses** (Document Store on the "laptop 4" address):
+  - a direct call to the store gets 401;
+  - police search 921 documents, the insurer 795;
+  - a tip-off added live with plate `DL 01 AB 1OO4` ranked 5th for `DL01AB1004 stolen`, linked to the car, and
+    raised "sighted in Hyderabad … after the last ANPR sighting";
+  - deleting it is refused for police (403) and works for admin.
+- **UI:** the page's JavaScript was run on the live responses; it renders with no undefined values.
+
 <!-- Add further hand edits here as separate commits: "- <commit>: <file>: <what> (<why>)" -->

@@ -90,10 +90,10 @@ Bengaluru, its FIR and claim, the car, its owner, and where it was seen.
 
 | Laptop | Runs | Command |
 |---|---|---|
-| 1 | Mediator + web app (+ document service in step 3) | `python start_system.py --services mediator,frontend` |
+| 1 | Mediator + web app | `python start_system.py --services mediator,frontend` |
 | 2 | VAHAN + IIB | `python start_system.py --services vahan,iib` |
 | 3 | Police + e-Challan | `python start_system.py --services police,echallan` |
-| 4 | ANPR | `python start_system.py --services anpr` |
+| 4 | ANPR + unstructured document store | `python start_system.py --services anpr,docs` |
 
 Setup:
 - **All laptops:** the same `.env` (same `FEDERATION_SECRET`, from `python -m backend.security init-env`), and
@@ -106,6 +106,7 @@ HOST_IIB=<laptop 2 IP>
 HOST_POLICE=<laptop 3 IP>
 HOST_ECHALLAN=<laptop 3 IP>
 HOST_ANPR=<laptop 4 IP>
+HOST_DOCS=<laptop 4 IP>
 ```
 
 The Mediator only reads an agency's database file when that agency is configured on its own machine (offline

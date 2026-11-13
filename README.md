@@ -116,6 +116,25 @@ python -m matching.evaluation      # print the algorithm comparison (≈30s)
 
 ---
 
+## 🧭 Phase 3: Distributed Context Discovery & Unstructured Data
+
+| Rubric | What | Write-up |
+|---|---|---|
+| Phase-2 feedback | **Need-to-know security.** Only the Mediator can call an agency (HMAC-signed requests). Users log in with a role (police / insurer / admin), and each agency enforces it itself. Every agency **computes its own answer** ("insured on <date>?", "stolen?") instead of sending rows. Plate matching is pushed down. Personal data is masked. Every access is in an append-only audit log. | [`docs/security.md`](docs/security.md) |
+| 1. 4–6 tables per DB, FK → PK | VAHAN 6 tables, IIB / Police / ANPR / e-Challan 5 each. Foreign keys are enforced on live writes. Cross-database keys: owner ↔ policyholder, claim ↔ FIR. | [`docs/database_design.md`](docs/database_design.md) |
+| 2. Context across DBs on different machines | The query is federated to the 5 databases. Each walks its **own FK → PK graph** and returns relevant facts plus cross-database keys, and the Mediator follows those keys in rounds. Context is kept only if relevant. Runs on 4 laptops (`start_system.py --services …`). | [`docs/context_discovery.md`](docs/context_discovery.md) |
+| 3. Unstructured data via the context | 1,333 free-text documents (FIRs, surveyor reports, news, tip-offs, officer notes) on their own service. The search is driven by the context, and the method is **chosen by measurement**: nDCG@10 0.33 → 0.86 → 1.00. Results are integrated with the databases: timeline, new leads, conflicts. | [`docs/unstructured_integration.md`](docs/unstructured_integration.md) |
+| 4. Prompts, generated code, our changes | Step-by-step log. | [`docs/vibe_coding_log.md`](docs/vibe_coding_log.md) |
+
+UI: **🧭 Context Discovery** (`/pages/context.html`).
+
+```bash
+python -m backend.security init-env   # once, on one laptop; copy the same .env to the others
+python -m docsearch.evaluation        # document-search method comparison (~1 min)
+```
+
+---
+
 ## 🌐 Deployed Microservices Directory
 
 | Service Name | Port | Database File | Local Table | Linking Identifier |
@@ -128,6 +147,7 @@ python -m matching.evaluation      # print the algorithm comparison (≈30s)
 | **Police CCTNS & RVSF** | `5004` | `backend/POLICE_CCTNS/theft_scrap.db` | `vehicle_status` | `vehicle_no` |
 | **Highway ANPR Cameras** | `5005` | `backend/ANPR_CAMERA/vehicle_capture.db` | `sightings` | `plate_number` |
 | **MoRTH e-Challan Portal**| `5006` | `backend/ECHALLAN/ministry_echallan.db` | `violation_reports` | `vehicle_identifier` |
+| **Unstructured Document Store** | `5007` | `backend/DOCS/documents.db` | `documents` (free text, no vehicle column) | found in the text |
 
 ---
 
@@ -146,6 +166,7 @@ pip install -r requirements.txt
 ### 2. Initialize Databases & Seed Data (2,000 Vehicles)
 ```bash
 python setup.py
+python -m backend.security init-env   # first laptop only: prints the admin / police / insurer passwords once
 ```
 
 ### 3. Launch All 7 Distributed Services Simultaneously
