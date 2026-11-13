@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
     box.appendChild(a);
   });
   document.getElementById('ctx-run').addEventListener('click', runContext);
+  document.getElementById('ctx-method').addEventListener('change', () => { if (document.getElementById('ctx-query').value.trim()) runContext(); });
+  document.getElementById('doc-add').addEventListener('click', addDocument);
   document.getElementById('ctx-query').addEventListener('keydown', e => { if (e.key === 'Enter') runContext(); });
   const q = new URLSearchParams(location.search).get('q');
   if (q) { document.getElementById('ctx-query').value = q; runContext(); }
@@ -35,7 +37,7 @@ async function runContext() {
   btn.textContent = 'Federating…';
   err.style.display = 'none';
   try {
-    const { ok, data } = await API.discoverContext(query);
+    const { ok, data } = await API.discoverContext(query, document.getElementById('ctx-method').value);
     if (!ok || data.status === 'error') throw new Error(data.error || 'Context discovery failed');
     render(data);
   } catch (e) {
@@ -54,6 +56,8 @@ function chips(list, fmt) {
 
 function render(d) {
   document.getElementById('ctx-result').style.display = 'block';
+  renderIntegrated(d);
+  renderDocuments(d.documents);
   const p = d.parsed;
   const seeds = Object.entries(p.seeds).map(([k, v]) => `<span class="ctx-chip">${esc(k)}: ${esc(v.join(', '))}</span>`).join('');
   const resolution = (p.plate_resolution || []).map(r => r.resolved_to
@@ -113,4 +117,95 @@ function render(d) {
       <td class="ctx-row">${esc(Object.entries(f.row).filter(([, v]) => v !== null && v !== '').slice(0, 7).map(([k, v]) => `${k}=${v}`).join('  ·  '))}</td>
     </tr>`).join('')}
     </tbody></table></div>`;
+}
+
+
+// ---------------------------------------------------------------------------
+// Rubric 3: documents + integration
+// ---------------------------------------------------------------------------
+const FINDING_STYLE = {
+  NEW_LEAD: ['badge-danger', '🚨 New lead'], STATUS_CONFLICT: ['badge-warning', '⚠️ Conflict'],
+  UNREPORTED_THEFT: ['badge-warning', '⚠️ Unreported theft'], UNCLAIMED_INCIDENT: ['badge-warning', '⚠️ Not claimed'],
+  NO_FIR: ['badge-warning', '⚠️ No FIR'], NOISY_PLATE: ['badge-info', '🧩 Noisy plate'],
+};
+
+function marked(text) {
+  return esc(text).replace(/\[\[(.+?)\]\]/g, '<mark>$1</mark>');
+}
+
+function renderIntegrated(d) {
+  const box = document.getElementById('ctx-integrated');
+  const plates = Object.keys(d.structured || {});
+  if (!plates.length) { box.innerHTML = '<span style="color:var(--text-muted)">No vehicle identified.</span>'; return; }
+  box.innerHTML = plates.map(p => {
+    const v = d.structured[p] || {};
+    const i = (d.integration || {})[p] || { findings: [], timeline: [], documents: [] };
+    const kv = [['Vehicle', `${v.make || ''} ${v.model || ''} ${v.color ? '(' + v.color + ')' : ''}`], ['Owner', v.owner_name],
+      ['Registration', v.registration_status],
+      ['Insurance', `${v.insurance_status || ''}${v.insurance_company ? ' · ' + v.insurance_company : ''}${v.insurance_expiry_date ? ' · till ' + v.insurance_expiry_date : ''}`],
+      ['Theft / scrap', `${v.suspicion_status || ''}${v.theft_report_date ? ' since ' + v.theft_report_date : ''}`],
+      ['Last camera sighting', v.capture_time ? `${v.capture_time} · ${v.location}` : 'never'], ['Open challans', v.open_challans],
+      ['Risk', v.risk_level]];
+    const findings = i.findings.length ? i.findings.map(f => {
+      const [cls, label] = FINDING_STYLE[f.type] || ['badge-info', f.type];
+      return `<div style="margin:0.25rem 0; font-size:0.83rem;"><span class="badge ${cls}">${label}</span> ${esc(f.detail)} <a href="#doc-${f.doc_id}" style="font-size:0.75rem;">doc #${f.doc_id}</a></div>`;
+    }).join('') : '<span style="color:var(--text-muted); font-size:0.83rem;">The documents agree with the databases.</span>';
+    const timeline = i.timeline.map(t => `<tr${t.origin === 'document' ? ' style="background:#fffbeb"' : ''}>
+      <td class="mono">${esc(t.date)}</td><td>${esc(t.event.replace(/_/g, ' '))}</td><td>${esc(t.detail)}</td>
+      <td>${t.origin === 'document' ? '📄 ' : '🗄️ '}${esc(t.source)}</td></tr>`).join('');
+    return `<div style="border:1px solid #e2e8f0; border-radius:8px; padding:0.9rem; margin-bottom:1rem;">
+      <div style="font-weight:700; font-family:var(--font-mono); margin-bottom:0.5rem;">${esc(p)} <span style="font-weight:400; color:var(--text-muted); font-family:inherit; font-size:0.8rem;">${i.documents.length} document(s) about this vehicle</span></div>
+      <div class="ctx-grid" style="gap:1rem;">
+        <dl class="ctx-kv">${kv.map(([k, val]) => `<dt>${k}</dt><dd>${esc(val ?? '—')}</dd>`).join('')}</dl>
+        <div><div style="font-weight:600; font-size:0.85rem; margin-bottom:0.3rem;">Findings from the documents</div>${findings}</div>
+      </div>
+      <details style="margin-top:0.6rem;" open><summary style="cursor:pointer; font-size:0.85rem; color:var(--accent-primary);">Timeline (🗄️ databases + 📄 documents)</summary>
+        <table class="data-table" style="margin-top:0.4rem;"><thead><tr><th>Date</th><th>Event</th><th>Detail</th><th>Source</th></tr></thead><tbody>${timeline}</tbody></table>
+      </details></div>`;
+  }).join('');
+}
+
+function renderDocuments(docs) {
+  const meta = document.getElementById('ctx-doc-meta');
+  const box = document.getElementById('ctx-docs');
+  if (!docs || docs.status !== 200) {
+    meta.textContent = '';
+    box.innerHTML = `<span style="color:#b91c1c">Document store unreachable: ${esc(docs && docs.error)}</span>`;
+    return;
+  }
+  meta.textContent = `${docs.method} · searched ${docs.searched} documents at ${docs.endpoint.replace('/api/v1/search', '')}` +
+    (docs.hidden_by_role ? ` · ${docs.hidden_by_role} not visible to your role` : '') + ` · ${docs.latency_ms} ms`;
+  const ctx = docs.search_context || {};
+  const ctxLine = `<div style="font-size:0.78rem; color:var(--text-muted); margin-bottom:0.6rem;">Searched with: plates ${esc((ctx.plates || []).join(', ') || '—')} ·
+    ids ${esc((ctx.ids || []).join(', ') || '—')} · places ${esc((ctx.cities || []).join(', ') || '—')} · vehicle ${esc((ctx.vehicle_words || []).join(' ') || '—')}
+    · ${(ctx.terms || []).length} weighted context terms</div>`;
+  box.innerHTML = ctxLine + (docs.results.length ? docs.results.map((r, n) => {
+    const b = r.breakdown || {};
+    const parts = [`text ${b.text}`];
+    if (b.plate !== undefined) {
+      parts.push(`plate ${b.plate}${b.plate_match ? ` (“${esc(b.plate_match.in_text)}” ≈ ${esc(b.plate_match.context_plate)})` : ''}`);
+      if (b.ids && b.ids.length) parts.push(`ids ${esc(b.ids.join(', '))}`);
+      if (b.places && b.places.length) parts.push(`place ${esc(b.places.join(', '))}`);
+      if (b.dates && b.dates.length) parts.push(`date ${esc(b.dates.join(', '))}`);
+    }
+    return `<div id="doc-${r.doc_id}" style="border-bottom:1px dashed #e2e8f0; padding:0.55rem 0;">
+      <div style="display:flex; justify-content:space-between; gap:1rem;">
+        <div><b>#${n + 1}</b> <span class="ctx-agency-tag">${esc(r.doc_type.replace('_', ' '))}</span> <b>${esc(r.title)}</b>
+          <span style="color:var(--text-muted); font-size:0.78rem;">· ${esc(r.source)} · ${esc(r.published_on)} · doc #${r.doc_id}</span></div>
+        <div style="white-space:nowrap;"><b>${r.score}</b></div>
+      </div>
+      <div style="font-size:0.83rem; margin:0.25rem 0;">${marked(r.snippet)}</div>
+      <div style="font-size:0.72rem; color:var(--text-muted);">score = ${parts.join(' · ')}</div>
+    </div>`;
+  }).join('') : '<span style="color:var(--text-muted)">No matching documents.</span>');
+}
+
+async function addDocument() {
+  const body = document.getElementById('doc-body').value.trim();
+  const msg = document.getElementById('doc-add-msg');
+  if (!body) { msg.textContent = 'Write the document text first.'; return; }
+  const { ok, data } = await API.addDocument({ doc_type: document.getElementById('doc-type').value, body });
+  msg.textContent = ok ? `Added as doc #${data.doc_id} (${data.visibility}). Running the query again…` : (data.error || 'Failed');
+  msg.style.color = ok ? '#047857' : '#b91c1c';
+  if (ok && document.getElementById('ctx-query').value.trim()) runContext();
 }

@@ -38,17 +38,24 @@
 
   <main class="content-area">
     <div class="glass-card" style="margin-bottom:1.5rem;">
-      <h2 style="font-size:1.5rem; font-weight:800;">🧭 Federated Context Discovery</h2>
+      <h2 style="font-size:1.5rem; font-weight:800;">🧭 Federated Context Discovery &amp; Document Integration</h2>
       <p style="font-size:0.85rem; color:var(--text-muted); max-width:900px; line-height:1.5; margin-bottom:1rem;">
         The query is split into sub-queries and sent to all five agency databases, each on its own machine.
         Every database follows its own FK → PK relationships to discover the context around the query and returns
         its most relevant facts plus the keys that lead into other databases (an owner id, an FIR number…).
         The Mediator sends those keys to the databases that hold them in the next round, and keeps only the facts
-        closely related to the query.
+        closely related to the query. That context then drives the search of the unstructured documents (FIR
+        narratives, surveyor reports, news, tip-offs, officer notes), and what the documents say is checked against
+        what the databases say.
       </p>
       <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
         <input id="ctx-query" class="search-input" style="flex:1; min-width:320px;"
                placeholder="e.g. Is DL01AB1004 stolen? any insurance claim?" autocomplete="off">
+        <select id="ctx-method" class="search-input" style="width:auto;" title="Document search method">
+          <option value="context_entities">Docs: context + entities (selected by measurement)</option>
+          <option value="bm25_context">Docs: BM25 on context terms</option>
+          <option value="bm25_query">Docs: BM25 on query words only</option>
+        </select>
         <button id="ctx-run" class="btn btn-primary">Discover context</button>
       </div>
       <div id="ctx-examples" style="margin-top:0.6rem; display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.8rem;">
@@ -68,6 +75,27 @@
           <h3 class="ctx-h">Accumulated context</h3>
           <div id="ctx-summary"></div>
         </div>
+      </div>
+
+      <div class="glass-card" style="margin:1.5rem 0;">
+        <h3 class="ctx-h">Integrated answer <span class="ctx-sub">databases' answers + what the documents add or contradict</span></h3>
+        <div id="ctx-integrated"></div>
+      </div>
+
+      <div class="glass-card" style="margin-bottom:1.5rem;">
+        <h3 class="ctx-h">5. Related documents <span class="ctx-sub" id="ctx-doc-meta"></span></h3>
+        <div id="ctx-docs"></div>
+        <details style="margin-top:1rem;">
+          <summary style="cursor:pointer; color:var(--accent-primary); font-size:0.85rem;">➕ Add a document (e.g. a new tip-off) — searchable immediately</summary>
+          <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.6rem;">
+            <select id="doc-type" class="search-input" style="width:auto;">
+              <option value="TIP_OFF">Tip-off (public)</option><option value="NEWS">News (public)</option>
+              <option value="OFFICER_NOTE">Officer note (police)</option><option value="SURVEYOR_REPORT">Surveyor report (insurer)</option>
+            </select>
+            <textarea id="doc-body" class="search-input" rows="3" placeholder="e.g. Tip-off: a blue Nexon DL 01 AB 1OO4 has been parked near Banjara Hills, Hyderabad since 13 Sep 2026; looks like the stolen one."></textarea>
+            <div><button id="doc-add" class="btn btn-secondary btn-sm">Add document</button> <span id="doc-add-msg" style="font-size:0.8rem;"></span></div>
+          </div>
+        </details>
       </div>
 
       <div class="glass-card" style="margin:1.5rem 0;">

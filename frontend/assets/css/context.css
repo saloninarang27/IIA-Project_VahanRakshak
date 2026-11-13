@@ -16,3 +16,4 @@
 .ctx-row { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-secondary); word-break: break-word; }
 .ctx-via { font-family: var(--font-mono); font-size: 0.72rem; color: #2563eb; }
 .ctx-agency-tag { font-size: 0.72rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 4px; background: #eef2ff; color: #3730a3; }
+mark { background: #fef08a; padding: 0 2px; border-radius: 2px; }

@@ -115,13 +115,31 @@ const API = {
     return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) };
   },
 
-  async discoverContext(query) {
-    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/query`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query })
+  async discoverContext(query, method) {
+    // federated context + document search + integration (POST /context/integrated)
+    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/integrated`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, method })
     });
     let data = null;
     try { data = await res.json(); } catch (e) { data = { error: `HTTP ${res.status}` }; }
     return { ok: res.ok, status: res.status, data };
+  },
+
+  async addDocument(doc) {
+    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/documents`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc)
+    });
+    return { ok: res.ok, data: await res.json() };
+  },
+
+  async deleteDocument(docId) {
+    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/documents/${docId}`, { method: 'DELETE' });
+    return { ok: res.ok, data: await res.json() };
+  },
+
+  async getDocument(docId) {
+    const res = await apiFetch(`${MEDIATOR_BASE_URL}/context/documents/${docId}`);
+    return { ok: res.ok, data: await res.json() };
   },
 
   getMatchingConfig() { return this._matching('/config'); },
