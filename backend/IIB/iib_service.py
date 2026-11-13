@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend import security
 from matching.sources import register_match_endpoint
+from backend.verdicts import register_verdict_endpoint
 
 app = Flask(__name__)
 
@@ -21,6 +22,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insurance_ii
 # No CORS: browsers never talk to an agency directly.
 ACCESS_POLICY = {
     ("GET", "/api/v1/identifiers"): {"ADMIN"},
+    ("GET", "/api/v1/policies"): {"INSURER", "ADMIN"},           # raw policy rows
     ("POST", "/api/v1/policies"): {"INSURER", "ADMIN"},
     ("POST", "/api/v1/internal/execute-sql"): {"ADMIN"},
 }
@@ -166,6 +168,9 @@ def execute_sql():
             "execution_ms": elapsed,
             "error": str(e)
         }), 400
+
+# The agency answers the Mediator's question itself (verdict push-down, backend/verdicts.py)
+register_verdict_endpoint(app, "IIB", get_db)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT_IIB", 5002))

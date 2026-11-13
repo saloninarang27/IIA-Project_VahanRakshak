@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend import security
 from matching.sources import register_match_endpoint
+from backend.verdicts import register_verdict_endpoint
 
 app = Flask(__name__)
 
@@ -180,6 +181,9 @@ def execute_sql():
             "execution_ms": elapsed,
             "error": str(e)
         }), 400
+
+# The agency answers the Mediator's question itself (verdict push-down, backend/verdicts.py)
+register_verdict_endpoint(app, "VAHAN", get_db)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT_VAHAN", 5003))

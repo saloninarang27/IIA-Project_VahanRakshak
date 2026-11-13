@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend import security
 from matching.sources import register_match_endpoint
+from backend.verdicts import register_verdict_endpoint
 import urllib.request
 import json
 
@@ -23,6 +24,7 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ministry_ech
 # No CORS: browsers never talk to an agency directly.
 ACCESS_POLICY = {
     ("GET", "/api/v1/identifiers"): {"ADMIN"},
+    ("GET", "/api/v1/challans"): {"POLICE", "ADMIN"},            # raw challans of a vehicle
     ("GET", "/api/v1/challans$"): {"POLICE", "ADMIN"},
     ("POST", "/api/v1/challans"): {"POLICE", "ADMIN"},
     ("PUT", "/api/v1/challans"): {"POLICE", "ADMIN"},
@@ -270,6 +272,9 @@ def execute_sql():
             "execution_ms": elapsed,
             "error": str(e)
         }), 400
+
+# The agency answers the Mediator's question itself (verdict push-down, backend/verdicts.py)
+register_verdict_endpoint(app, "ECHALLAN", get_db)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT_ECHALLAN", 5006))
