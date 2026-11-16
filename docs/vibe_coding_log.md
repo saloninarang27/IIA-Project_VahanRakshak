@@ -26,7 +26,7 @@ In VS Code, the *Timeline* view or *GitLens* shows the same diffs with highlight
 |---|---|---|
 | 1: Federated integration | 2026-09-08 → 09-18 | `2c71694` … `c4f28cf` |
 | 2: Noisy data: approximate matching and cleansing | 2026-10-20 → 10-22 | `be12293` … `dfa3d91` |
-| 3: Security (step 0), then unstructured data integration | 2026-11-13 → | `8e2ca2f` … (branch `phase3`) |
+| 3: Security (step 0), then unstructured data integration | 2026-11-13 → | `8e2ca2f` … `670110e` (on `main`) |
 
 ---
 
