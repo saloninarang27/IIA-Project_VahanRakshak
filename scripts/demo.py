@@ -1,7 +1,7 @@
-"""
+﻿"""
 scripts/demo.py
 ===============
-Command-Line Demonstration Engine for VehicleSentinel.
+Command-Line Demonstration Engine for VahanRakshak.
 
 Demonstrates:
   1. High-level plate inquiry decomposed into 5 independent agency queries
@@ -52,7 +52,7 @@ def check_mediator_online():
     try:
         req = urllib.request.Request(
             "http://127.0.0.1:5001/api/v1/health",
-            headers={"User-Agent": "VehicleSentinel-CLI/2.0"}
+            headers={"User-Agent": "VahanRakshak-CLI/2.0"}
         )
         with urllib.request.urlopen(req, timeout=1.0) as resp:
             return resp.status == 200
@@ -64,7 +64,7 @@ def fetch_from_mediator_api(plate: str):
     """Fetches real-time dossier and cache metadata from Mediator API."""
     url = f"{MEDIATOR_URL}/{plate}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "VehicleSentinel-CLI/2.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "VahanRakshak-CLI/2.0"})
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
@@ -124,7 +124,7 @@ def print_vehicle_demo(plate: str, expectation: str, mediator_online: bool):
 
 def main():
     print("=" * 80)
-    print("🛡️  VEHICLESENTINEL: FEDERATED COMPLIANCE INTELLIGENCE DEMO")
+    print("🛡️  VahanRakshak: FEDERATED COMPLIANCE INTELLIGENCE DEMO")
     print("   Information Integration & Analytics (IIA) — Project A")
     print("=" * 80)
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Global App Helpers and Navigation Management
  */
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,7 +19,7 @@ function showLoginGate(message) {
   gate.style.zIndex = '10000';
   gate.innerHTML = `
     <div class="modal-card" style="max-width:380px;">
-      <div class="modal-header"><div class="modal-title">🔐 Sign in to VehicleSentinel</div></div>
+      <div class="modal-header"><div class="modal-title">🔐 Sign in to VahanRakshak</div></div>
       <div class="modal-body">
         <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">
           Access is need-to-know: police, insurer and admin accounts see different data.</p>

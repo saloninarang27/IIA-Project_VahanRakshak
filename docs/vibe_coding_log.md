@@ -1,6 +1,6 @@
-# Vibe-Coding Log: Prompts, Generated Code and Our Changes
+﻿# Vibe-Coding Log: Prompts, Generated Code and Our Changes
 
-**Project:** VehicleSentinel: identification of uninsured vehicles on the road (IIA Project A).
+**Project:** VahanRakshak: identification of uninsured vehicles on the road (IIA Project A).
 **Team:** Aastha Kalbhor (MT25007), Aniket Raj Singh (MT25015), Anurag Sharma (MT25063), Saloni (MT25081).
 **Assistant:** Claude Code.
 

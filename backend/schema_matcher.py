@@ -1,7 +1,7 @@
-"""
+﻿"""
 backend/schema_matcher.py
 =========================
-Semantic Schema Matching Engine for VehicleSentinel / VahanRakshak.
+Semantic Schema Matching Engine for VahanRakshak / VahanRakshak.
 
 Implements Rubric Point 5:
 "Schema matching/mapping algorithm OR DWH views selection and data propagation

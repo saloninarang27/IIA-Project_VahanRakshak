@@ -1,6 +1,6 @@
-<div align="center">
+﻿<div align="center">
 
-# 🛡️ VehicleSentinel: Distributed Compliance Intelligence
+# 🛡️ VahanRakshak: Distributed Compliance Intelligence
 ### Real-Time Federated Cross-Verification Across Heterogeneous Transport Databases
 **Information Integration & Analytics (IIA) — Project A Enterprise Implementation**
 
@@ -30,9 +30,9 @@
 
 ## 📖 Executive Summary & Scope
 
-**VehicleSentinel** is a production-grade, distributed information integration system designed to detect uninsured, stolen, and non-compliant vehicles in real-time as they travel across national highway networks.
+**VahanRakshak** is a production-grade, distributed information integration system designed to detect uninsured, stolen, and non-compliant vehicles in real-time as they travel across national highway networks.
 
-Instead of an outdated monolithic database, **VehicleSentinel** implements a modern multi-tier federated microservices architecture. It federates **5 independent government and corporate silos** mimicking India's Digital Public Infrastructure (DPI):
+Instead of an outdated monolithic database, **VahanRakshak** implements a modern multi-tier federated microservices architecture. It federates **5 independent government and corporate silos** mimicking India's Digital Public Infrastructure (DPI):
 - **Highway ANPR Cameras** (National Highways Authority of India)
 - **IRDAI IIB** (Insurance Information Bureau of India)
 - **MoRTH VAHAN** (National Vehicle Registry via API Setu)
@@ -233,8 +233,8 @@ from the others.
 ### 1. Prerequisites & Dependencies
 ```bash
 # Clone the repository
-git clone https://github.com/saloninarang27/IIA-Project_VehicleSentinel.git
-cd IIA-Project_VehicleSentinel
+git clone https://github.com/saloninarang27/IIA-Project_VahanRakshak.git
+cd IIA-Project_VahanRakshak
 
 # Install requirements
 pip install -r requirements.txt
