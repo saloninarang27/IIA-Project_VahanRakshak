@@ -49,7 +49,6 @@ All sources communicate through a central **Mediator (Global Schema Coordinator)
 |---|---|:---:|---|
 | **1** | Federated integration of five agency databases, mediator, warehouse, GUI | 15 | [Phase 1](#phase-1-federated-integration-15-marks) |
 | **2** | Approximate vehicle matching from a scanned plate, data cleansing | 15 | [Phase 2](#phase-2-approximate-matching--cleansing-15-marks) |
-| **Feedback** | Phase-2 review: no data breach, no database dumps; each agency computes its own answer | — | [Security](#phase-2-feedback-need-to-know-security--distributed-answers) |
 | **3** | FK → PK context discovery across machines, unstructured data integrated with the query context | 10 | [Phase 3](#phase-3-distributed-context-discovery--unstructured-data-10-marks) |
 
 Every phase is logged prompt by prompt, with the generated code and our own changes, in
@@ -76,7 +75,7 @@ Every phase is logged prompt by prompt, with the generated code and our own chan
 | **2** | **Cleanse the recorded data w.r.t. the image and contextual data; no anomalies left** | **5** | Priority-ordered rules **R1–R9** decide **ACCEPT / CORRECT / REJECT / REVIEW** from make, model, colour and type; corrections are written back to each agency through its own service, with an append-only audit. Agrees with all 112 labelled records; a rescan shows 0 anomalies. | [`matching/cleansing.py`](matching/cleansing.py), [`matching/agency_cleansing.py`](matching/agency_cleansing.py) |
 | **3** | **Prompts, generated code, our changes** | **5** | Prompt-by-prompt log with the commits each prompt produced. | [`docs/vibe_coding_log.md`](docs/vibe_coding_log.md) |
 
-### Phase-2 feedback: need-to-know security & distributed answers
+### Phase-2... security & distributed answers
 
 The review asked for **no data breach**, a Mediator that **does not dump whole databases**, and agencies that
 **compute their own answer** (the insurer answers "is the car in this challan photo insured?", not "here are my rows").
